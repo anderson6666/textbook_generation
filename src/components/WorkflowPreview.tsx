@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { X, Eye, History, Trash2, RotateCcw, Play, Sparkles } from 'lucide-react'
 import { useWorkflow } from '../context/WorkflowContext'
 import { useNavigate } from 'react-router-dom'
@@ -15,14 +15,15 @@ function WorkflowPreview() {
 
   // 计算是否有内容
   const detailSectionsCount = Object.keys(workflow.detailSections).length
-  const hasContent = workflow.outline || workflow.detail || workflow.output || detailSectionsCount > 0
+  const outputSectionsCount = Object.keys(workflow.outputSections).length
+  const hasContent = workflow.outline || workflow.detail || workflow.output || detailSectionsCount > 0 || outputSectionsCount > 0
 
   // 当有新内容时自动显示预览
   useEffect(() => {
     if (hasContent) {
       setIsVisible(true)
     }
-  }, [hasContent, detailSectionsCount, workflow.outline, workflow.output])
+  }, [hasContent, detailSectionsCount, outputSectionsCount, workflow.outline, workflow.output])
 
   // 当细纲数量变化时，强制更新
   useEffect(() => {
@@ -182,6 +183,9 @@ function WorkflowPreview() {
 
       if (outputContent) {
         fullContent += `### 正文\n\n${outputContent}\n\n`
+      } else if (Object.keys(outputSections).length > 0) {
+        // 如果其他章节已有正文但当前章节没有，显示提示
+        fullContent += `### 正文\n\n（待生成）\n\n`
       }
 
       /**
@@ -228,7 +232,16 @@ function WorkflowPreview() {
   const hasDetailButNoOutput = Object.keys(wf.detailSections).length > 0
 
   // 构建完整文档
-  const fullDocument = buildFullDocument()
+  const fullDocument = useMemo(() => {
+    return buildFullDocument()
+  }, [
+    workflow.outline,
+    workflow.outlineChapters,
+    workflow.detailSections,
+    workflow.output,
+    workflow.outputSections,
+    detailSectionsCount,
+  ])
 
   const formatDate = (timestamp: number) => {
     const date = new Date(timestamp)
