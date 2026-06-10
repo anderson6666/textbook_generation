@@ -96,11 +96,13 @@ function Sidebar() {
               }}
               style={isDisabled ? { pointerEvents: 'none' } : undefined}
             >
-              <item.icon className="nav-icon" />
-              <span className="nav-label">{item.label}</span>
-              {isCurrentStep && isRunning && (
-                <Loader2 className="nav-spinner" size={14} />
-              )}
+              <span className="nav-content">
+                <item.icon className="nav-icon" />
+                <span className="nav-label">{item.label}</span>
+                {isCurrentStep && isRunning && (
+                  <Loader2 className="nav-spinner" size={14} />
+                )}
+              </span>
             </NavLink>
           )
         })}
