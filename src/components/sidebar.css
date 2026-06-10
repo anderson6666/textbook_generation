@@ -1,0 +1,266 @@
+.sidebar {
+  width: 240px;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 0;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar-working {
+  opacity: 0.7;
+}
+
+.sidebar-working .nav-item:not(.current-step) {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.sidebar-header {
+  padding: 0 20px 30px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  color: #667eea;
+}
+
+.logo-text {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.workflow-status {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(102, 126, 234, 0.1);
+  border-radius: 8px;
+}
+
+.workflow-progress-bar {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.workflow-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #764ba2);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.workflow-progress-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflow-spinner {
+  animation: spin 1s linear infinite;
+  color: #667eea;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.workflow-progress-text {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 0 10px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 4px;
+  border-radius: 8px;
+  color: #a0aec0;
+  text-decoration: none;
+  transition: all 0.3s ease;
+}
+
+.nav-item:hover {
+  background: rgba(102, 126, 234, 0.1);
+  color: #fff;
+}
+
+.nav-item.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+}
+
+.nav-item.current-step {
+  background: rgba(102, 126, 234, 0.2);
+  border: 1px solid rgba(102, 126, 234, 0.4);
+  color: #fff;
+}
+
+.nav-item.completed .nav-icon {
+  color: #22c55e;
+}
+
+.nav-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.nav-label {
+  font-size: 14px;
+  font-weight: 500;
+  flex: 1;
+}
+
+.nav-spinner {
+  animation: spin 1s linear infinite;
+  color: #667eea;
+}
+
+.sidebar-footer {
+  padding: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.version {
+  font-size: 12px;
+  color: #718096;
+}
+
+.powered-by {
+  font-size: 10px;
+  color: #4a5568;
+  margin-top: 4px;
+}
+
+/* 手机适配 */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 100%;
+    min-height: auto;
+    padding: 12px 16px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  
+  .sidebar-header {
+    padding: 0;
+    margin-right: 16px;
+    display: flex;
+    align-items: center;
+  }
+  
+  .logo-text {
+    font-size: 16px;
+  }
+  
+  .logo-icon {
+    width: 28px;
+    height: 28px;
+  }
+  
+  .workflow-status {
+    margin-top: 0;
+    margin-left: auto;
+    padding: 8px 12px;
+  }
+  
+  .workflow-progress-bar {
+    display: none;
+  }
+  
+  .workflow-progress-text {
+    font-size: 11px;
+  }
+  
+  .sidebar-nav {
+    display: flex;
+    flex-direction: row;
+    padding: 0;
+    gap: 4px;
+    width: 100%;
+    margin-top: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  
+  .nav-item {
+    padding: 8px 12px;
+    margin-bottom: 0;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 50px;
+    justify-content: center;
+    text-align: center;
+  }
+  
+  .nav-label {
+    font-size: 10px;
+    display: block;
+  }
+  
+  .nav-icon {
+    width: 18px;
+    height: 18px;
+  }
+  
+  .sidebar-footer {
+    display: none;
+  }
+}
+
+/* 超小屏幕 */
+@media (max-width: 480px) {
+  .sidebar {
+    padding: 8px 12px;
+  }
+  
+  .logo-text {
+    font-size: 14px;
+  }
+  
+  .workflow-status {
+    padding: 6px 10px;
+  }
+  
+  .workflow-progress-text {
+    font-size: 10px;
+  }
+  
+  .nav-item {
+    padding: 6px 10px;
+    min-width: 40px;
+  }
+  
+  .nav-label {
+    font-size: 9px;
+  }
+  
+  .nav-icon {
+    width: 16px;
+    height: 16px;
+  }
+}
