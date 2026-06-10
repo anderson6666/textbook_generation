@@ -36,7 +36,7 @@ export function useAgnesAPI(): UseAgnesAPI {
               content: prompt
             }
           ],
-          max_tokens: 8192,
+          max_tokens: 15000,
           temperature: 0.2
         })
       })
