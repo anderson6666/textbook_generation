@@ -8,8 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
@@ -20,10 +18,14 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        shell: bash
+        run: |
+          npm install
 
       - name: Build
-        run: npm run build
+        shell: bash
+        run: |
+          npm run build
 
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v4
