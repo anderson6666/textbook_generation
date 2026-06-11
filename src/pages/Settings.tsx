@@ -5,6 +5,16 @@ import { useWorkflow } from '../context/WorkflowContext'
 function Settings() {
   const [apiKey, setApiKey] = useState(localStorage.getItem('agnesApiKey') || '')
   const [apiUrl, setApiUrl] = useState(localStorage.getItem('agnesApiUrl') || 'https://apihub.agnes-ai.com/v1')
+  
+  const [outlineApiKey, setOutlineApiKey] = useState(localStorage.getItem('outlineApiKey') || '')
+  const [outlineApiUrl, setOutlineApiUrl] = useState(localStorage.getItem('outlineApiUrl') || '')
+  
+  const [detailApiKey, setDetailApiKey] = useState(localStorage.getItem('detailApiKey') || '')
+  const [detailApiUrl, setDetailApiUrl] = useState(localStorage.getItem('detailApiUrl') || '')
+  
+  const [outputApiKey, setOutputApiKey] = useState(localStorage.getItem('outputApiKey') || '')
+  const [outputApiUrl, setOutputApiUrl] = useState(localStorage.getItem('outputApiUrl') || '')
+  
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark')
   const [language, setLanguage] = useState(localStorage.getItem('language') || 'zh')
   const [notifications, setNotifications] = useState(localStorage.getItem('notifications') === 'true')
@@ -12,13 +22,18 @@ function Settings() {
   const [showSaved, setShowSaved] = useState(false)
   const { workflow, setWorkflowEnabled } = useWorkflow()
 
-  // 自动保存设置到localStorage
   useEffect(() => {
     if (!autoSave) return
     
     const saveTimeout = setTimeout(() => {
       localStorage.setItem('agnesApiKey', apiKey)
       localStorage.setItem('agnesApiUrl', apiUrl)
+      localStorage.setItem('outlineApiKey', outlineApiKey)
+      localStorage.setItem('outlineApiUrl', outlineApiUrl)
+      localStorage.setItem('detailApiKey', detailApiKey)
+      localStorage.setItem('detailApiUrl', detailApiUrl)
+      localStorage.setItem('outputApiKey', outputApiKey)
+      localStorage.setItem('outputApiUrl', outputApiUrl)
       localStorage.setItem('theme', theme)
       localStorage.setItem('language', language)
       localStorage.setItem('notifications', notifications.toString())
@@ -28,11 +43,17 @@ function Settings() {
     }, 500)
 
     return () => clearTimeout(saveTimeout)
-  }, [apiKey, apiUrl, theme, language, notifications, autoSave])
+  }, [apiKey, apiUrl, outlineApiKey, outlineApiUrl, detailApiKey, detailApiUrl, outputApiKey, outputApiUrl, theme, language, notifications, autoSave])
 
   const handleSave = () => {
     localStorage.setItem('agnesApiKey', apiKey)
     localStorage.setItem('agnesApiUrl', apiUrl)
+    localStorage.setItem('outlineApiKey', outlineApiKey)
+    localStorage.setItem('outlineApiUrl', outlineApiUrl)
+    localStorage.setItem('detailApiKey', detailApiKey)
+    localStorage.setItem('detailApiUrl', detailApiUrl)
+    localStorage.setItem('outputApiKey', outputApiKey)
+    localStorage.setItem('outputApiUrl', outputApiUrl)
     localStorage.setItem('theme', theme)
     localStorage.setItem('language', language)
     localStorage.setItem('notifications', notifications.toString())
@@ -44,12 +65,17 @@ function Settings() {
   const handleReset = () => {
     setApiKey('')
     setApiUrl('https://apihub.agnes-ai.com/v1')
+    setOutlineApiKey('')
+    setOutlineApiUrl('')
+    setDetailApiKey('')
+    setDetailApiUrl('')
+    setOutputApiKey('')
+    setOutputApiUrl('')
     setTheme('dark')
     setLanguage('zh')
     setNotifications(true)
     setAutoSave(true)
     
-    // 如果开启了自动保存，会自动保存到localStorage
     if (!autoSave) {
       handleSave()
     }
@@ -66,8 +92,9 @@ function Settings() {
         <div className="settings-card">
           <h3 className="card-title">
             <Database className="card-icon" />
-            Agnes AI API配置
+            Agnes AI API配置（通用）
           </h3>
+          <p className="api-hint">当以下专项API未配置时，将使用此通用配置</p>
           <div className="form-group">
             <label className="form-label">API Key</label>
             <input
@@ -95,6 +122,90 @@ function Settings() {
               placeholder="Agnes AI API URL"
               value={apiUrl}
               onChange={(e) => setApiUrl(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="settings-card api-section">
+          <h3 className="card-title">
+            <Globe className="card-icon" />
+            大纲生成 API 配置
+          </h3>
+          <p className="api-hint">用于生成教科书大纲</p>
+          <div className="form-group">
+            <label className="form-label">API Key</label>
+            <input
+              type="password"
+              className="input-field"
+              placeholder="大纲生成专用API Key（留空使用通用配置）"
+              value={outlineApiKey}
+              onChange={(e) => setOutlineApiKey(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">API 端点</label>
+            <input
+              type="text"
+              className="input-field"
+              placeholder="大纲生成API URL（留空使用通用配置）"
+              value={outlineApiUrl}
+              onChange={(e) => setOutlineApiUrl(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="settings-card api-section">
+          <h3 className="card-title">
+            <Zap className="card-icon" />
+            细纲分点 API 配置
+          </h3>
+          <p className="api-hint">用于将大纲细化为知识点</p>
+          <div className="form-group">
+            <label className="form-label">API Key</label>
+            <input
+              type="password"
+              className="input-field"
+              placeholder="细纲分点专用API Key（留空使用通用配置）"
+              value={detailApiKey}
+              onChange={(e) => setDetailApiKey(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">API 端点</label>
+            <input
+              type="text"
+              className="input-field"
+              placeholder="细纲分点API URL（留空使用通用配置）"
+              value={detailApiUrl}
+              onChange={(e) => setDetailApiUrl(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="settings-card api-section">
+          <h3 className="card-title">
+            <Bell className="card-icon" />
+            知识输出 API 配置
+          </h3>
+          <p className="api-hint">用于生成详细知识内容</p>
+          <div className="form-group">
+            <label className="form-label">API Key</label>
+            <input
+              type="password"
+              className="input-field"
+              placeholder="知识输出专用API Key（留空使用通用配置）"
+              value={outputApiKey}
+              onChange={(e) => setOutputApiKey(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">API 端点</label>
+            <input
+              type="text"
+              className="input-field"
+              placeholder="知识输出API URL（留空使用通用配置）"
+              value={outputApiUrl}
+              onChange={(e) => setOutputApiUrl(e.target.value)}
             />
           </div>
         </div>
