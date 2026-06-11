@@ -4,7 +4,7 @@
   "description": "终身学习者的教科书编辑器",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && npx vite build",
+    "build": "tsc && node node_modules/vite/bin/vite.js build",
     "preview": "vite preview",
     "deploy": "gh-pages -d dist"
   },
