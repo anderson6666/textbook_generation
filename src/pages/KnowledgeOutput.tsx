@@ -11,13 +11,19 @@ import {
   Eye,
   Code2,
   Play,
+  FileText,
 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useAgnesAPI } from '../hooks/useAgnesAPI'
 import { useWorkflow } from '../context/WorkflowContext'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
+import remarkGfm from 'remark-gfm'
 import rehypeKatex from 'rehype-katex'
+import rehypeRaw from 'rehype-raw'
+import { marked } from 'marked'
 import 'katex/dist/katex.min.css'
+import { secureStorage } from '../utils/secureStorage'
 
 const systemPrompt = `
 你是一位专业的知识输出专家，擅长将细粒度的知识点**极致详细、全面深入、多角度全方位**地展开为完整的学习内容。
@@ -29,6 +35,7 @@ const systemPrompt = `
 - 不仅讲解标准情况，还要覆盖特殊情况、边界情况、极限情况
 - 不仅给出典型例子，还要提供反例、易错案例、对比案例
 - 不仅分析正面内容，还要探讨相关概念、延伸知识、跨学科联系
+- 如果与生活有关的，尽量脱离量化，而是与生活技巧贴合。如果是与量化考试有关的，尽量与考点贴合。
 
 重要要求：
 1. **极致详尽**：必须深入到细纲中的**所有**最细粒度子节点，对**每个**小知识点进行**深入、全面、细致**的讲解，**不遗漏任何细节**
@@ -390,6 +397,7 @@ AC段位移：x = ½a(2t)² = 2at² = 2v²/a（或用x = ½(0 + v_C)·2t = ½(2v
 `
 
 function KnowledgeOutput() {
+  const navigate = useNavigate()
   const autoSaveEnabled = localStorage.getItem('autoSave') === 'true'
 
   const [knowledge, setKnowledge] = useState(
@@ -406,11 +414,18 @@ function KnowledgeOutput() {
   const [stopRequested, setStopRequested] = useState(false)
   const [currentDetailIndex, setCurrentDetailIndex] = useState(0)
   const [hasGenerated, setHasGenerated] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage] = useState(5)
+  const [isPaginated, setIsPaginated] = useState(false)
+  const [copyDone, setCopyDone] = useState(false)
+  const markdownRef = useRef<HTMLDivElement>(null)
 
   const stopRequestedRef = useRef(false)
   const autoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const completedCountRef = useRef(0)
 
-  const { loading, generateContent } = useAgnesAPI()
+  const { loading, generateContent, apiError, clearError } = useAgnesAPI()
+  const [showError, setShowError] = useState(false)
 
   const {
     workflow,
@@ -418,8 +433,38 @@ function KnowledgeOutput() {
     updateOutputSection,
     setCurrentStep,
     setIsRunning,
+    addRunningOutputTask,
+    removeRunningOutputTask,
+    saveToHistory,
   } = useWorkflow()
   const isRunning = workflow.isRunning
+
+  useEffect(() => {
+    if (workflow.currentStep === 'output' && workflow.enabled) {
+      const outputCount = Object.keys(workflow.outputSections).length
+      const hasExistingOutput = outputCount > 0
+      setHasGenerated(hasExistingOutput)
+      setCurrentDetailIndex(0)
+    }
+  }, [workflow.currentStep, workflow.enabled, workflow.outputSections])
+
+  useEffect(() => {
+    if (apiError && apiError.type === 'api') {
+      setShowError(true)
+      setIsRunning(false)
+    }
+  }, [apiError, setIsRunning])
+
+  useEffect(() => {
+    if (workflow.parallelMode && workflow.currentStep === 'output') {
+      const detailCount = Object.keys(workflow.detailSections).length
+      const outputCount = Object.keys(workflow.outputSections).length
+      
+      if (detailCount > outputCount && detailCount >= workflow.detailAheadCount) {
+        setHasGenerated(false)
+      }
+    }
+  }, [workflow.parallelMode, workflow.currentStep, workflow.detailSections, workflow.outputSections, workflow.detailAheadCount])
 
   const detailChapters = useMemo(() => {
     return workflow.outlineChapters.filter((chapter) => {
@@ -427,14 +472,82 @@ function KnowledgeOutput() {
     })
   }, [workflow.outlineChapters, workflow.detailSections])
 
+  // 计算已生成的输出内容 - 包含所有章节，无论细纲和正文是否存在
+  const generatedOutput = useMemo(() => {
+    const allOutput = workflow.outlineChapters
+      .filter((chapter) => chapter && chapter.trim())
+      .map((chapter) => {
+        const chapterOutput = workflow.outputSections?.[chapter] || ''
+        if (!chapterOutput.trim()) {
+          return `# ${chapter}
+
+（暂无内容）`
+        }
+        return `# ${chapter}
+
+${chapterOutput}`
+      })
+      .join('\n\n---\n\n')
+    return allOutput
+  }, [workflow.outlineChapters, workflow.outputSections])
+
+  // 自动更新显示已生成的内容（仅在工作流模式下）
+  useEffect(() => {
+    if (generatedOutput && workflow.enabled) {
+      setOutput(generatedOutput)
+      setRawOutput(generatedOutput)
+      setShowPreview(true)
+      setCurrentPage(1)
+    }
+  }, [generatedOutput, workflow.enabled])
+
+  // 获取所有有正文输出的章节（基于大纲章节列表）
+  const outputChapters = useMemo(() => {
+    return workflow.outlineChapters.filter((chapter) => {
+      return chapter && chapter.trim() && workflow.outputSections?.[chapter]
+    })
+  }, [workflow.outlineChapters, workflow.outputSections])
+
+  // 分页输出内容 - 首次只加载第一页
+  const paginatedOutput = useMemo(() => {
+    const chapters = outputChapters.filter((_, index) => {
+      if (!isPaginated) {
+        return index < itemsPerPage
+      }
+      const startIndex = (currentPage - 1) * itemsPerPage
+      const endIndex = startIndex + itemsPerPage
+      return index >= startIndex && index < endIndex
+    })
+
+    return chapters
+      .map((chapter) => {
+        const chapterOutput = workflow.outputSections?.[chapter] || ''
+        if (!chapterOutput.trim()) return ''
+        return `# ${chapter}\n\n${chapterOutput}`
+      })
+      .filter(Boolean)
+      .join('\n\n---\n\n')
+  }, [outputChapters, workflow.outputSections, currentPage, itemsPerPage, isPaginated])
+
+  const totalPages = useMemo(() => {
+    return Math.ceil(outputChapters.length / itemsPerPage)
+  }, [outputChapters, itemsPerPage])
+
+  const handlePageChange = (page: number) => {
+    setIsPaginated(true)
+    setCurrentPage(page)
+  }
+
+  const progressChapters = workflow.outlineChapters.filter(ch => ch && ch.trim())
+  
   const progress =
-    detailChapters.length > 0
-      ? (currentDetailIndex / detailChapters.length) * 100
+    progressChapters.length > 0
+      ? Math.min((currentDetailIndex / progressChapters.length) * 100, 100)
       : 0
 
   const progressText =
-    detailChapters.length > 0
-      ? `${currentDetailIndex} / ${detailChapters.length}`
+    progressChapters.length > 0
+      ? `${Math.min(currentDetailIndex, progressChapters.length)} / ${progressChapters.length}`
       : ''
 
   const clearAutoTimer = () => {
@@ -468,9 +581,52 @@ function KnowledgeOutput() {
     }
   }, [knowledge, detailChapters.length])
 
+  const generateOutputForChapter = async (chapter: string): Promise<string | null> => {
+    if (stopRequestedRef.current) return null
+
+    addRunningOutputTask(chapter)
+    
+    const detailContent = workflow.detailSections[chapter]
+    
+    let prompt = `${systemPrompt}
+
+章节标题：${chapter}`
+
+    if (detailContent && detailContent.trim()) {
+      prompt += `
+
+细纲内容：
+${detailContent}`
+    } else {
+      prompt += `
+
+请根据章节标题生成详细的知识内容。`
+    }
+
+    const response = await generateContent(prompt)
+    removeRunningOutputTask(chapter)
+
+    if (stopRequestedRef.current) return null
+
+    if (response) {
+      updateOutputSection(chapter, response)
+      return response
+    }
+
+    return null
+  }
+
   const handleGenerateAll = useCallback(async () => {
-    if (detailChapters.length === 0) return
+    const validChapters = workflow.outlineChapters.filter(ch => ch && ch.trim())
+    if (validChapters.length === 0) return
     if (loading || isRunning) return
+
+    // 检查 API Key 是否配置
+    const apiKey = secureStorage.getApiKey()
+    if (!apiKey || !apiKey.trim()) {
+      navigate('/settings')
+      return
+    }
 
     stopRequestedRef.current = false
     setStopRequested(false)
@@ -478,45 +634,47 @@ function KnowledgeOutput() {
     setIsRunning(true)
     setCurrentStep('output')
     setCurrentDetailIndex(0)
+    completedCountRef.current = 0
+
+    const maxParallel = workflow.maxParallelTasks || 4
+    const chaptersToProcess = validChapters.filter(
+      (ch) => !workflow.outputSections[ch]
+    )
+    
+    if (chaptersToProcess.length === 0) {
+      setIsRunning(false)
+      return
+    }
 
     const generatedSections: Record<string, string> = {}
 
-    for (let i = 0; i < detailChapters.length; i += 1) {
-      if (stopRequestedRef.current) {
-        setIsRunning(false)
-        return
+    const processChunks = async () => {
+      for (let i = 0; i < chaptersToProcess.length; i += maxParallel) {
+        if (stopRequestedRef.current) return
+
+        const chunk = chaptersToProcess.slice(i, i + maxParallel)
+        const tasks = chunk.map(async (chapter) => {
+          const result = await generateOutputForChapter(chapter)
+          if (result) {
+            generatedSections[chapter] = result
+          }
+          completedCountRef.current += 1
+          setCurrentDetailIndex(completedCountRef.current)
+        })
+
+        await Promise.all(tasks)
       }
-
-      const chapter = detailChapters[i]
-      const detailContent = workflow.detailSections[chapter]
-
-      if (!detailContent) continue
-
-      setCurrentDetailIndex(i + 1)
-
-      const prompt = `${systemPrompt}
-
-章节标题：${chapter}
-
-细纲内容：
-${detailContent}`
-
-      const response = await generateContent(prompt)
-
-      if (stopRequestedRef.current) {
-        setIsRunning(false)
-        return
-      }
-
-      if (response) {
-        generatedSections[chapter] = response
-        updateOutputSection(chapter, response)
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 500))
     }
 
+    await processChunks()
+
     if (stopRequestedRef.current) {
+      setIsRunning(false)
+      return
+    }
+
+    // 如果有 API 错误，立即停止运行
+    if (apiError) {
       setIsRunning(false)
       return
     }
@@ -543,24 +701,34 @@ ${chapterOutput}`
     setShowPreview(true)
     setHasGenerated(true)
     setIsRunning(false)
+    
+    if (workflow.outlineChapters.length > 0) {
+      const topic = workflow.outlineChapters[0] || '知识输出'
+      saveToHistory(topic)
+    }
   }, [
     detailChapters,
     workflow.detailSections,
     workflow.outputSections,
+    workflow.outlineChapters,
     generateContent,
     updateOutputSection,
     updateOutput,
+    saveToHistory,
     setCurrentStep,
     setIsRunning,
+    addRunningOutputTask,
+    removeRunningOutputTask,
     loading,
     isRunning,
   ])
 
   useEffect(() => {
+    const validChapters = workflow.outlineChapters.filter(ch => ch && ch.trim())
     if (
       workflow.enabled &&
       workflow.currentStep === 'output' &&
-      detailChapters.length > 0 &&
+      validChapters.length > 0 &&
       !loading &&
       !isRunning &&
       !hasGenerated &&
@@ -581,7 +749,7 @@ ${chapterOutput}`
   }, [
     workflow.enabled,
     workflow.currentStep,
-    detailChapters.length,
+    workflow.outlineChapters,
     loading,
     isRunning,
     hasGenerated,
@@ -684,10 +852,69 @@ ${workflow.detail}
   }
 
   const handleCopy = async () => {
-    const content = rawOutput || output
-    if (!content.trim()) return
+    try {
+      // 获取所有已生成的完整内容
+      const allContent = generatedOutput || (rawOutput || output)
+      if (!allContent.trim()) return
 
-    await navigator.clipboard.writeText(content)
+      // 使用 marked 解析 Markdown 为 HTML
+      const htmlContent = marked.parse(allContent) as string
+      
+      // 创建临时容器来渲染 HTML
+      const tempContainer = document.createElement('div')
+      tempContainer.innerHTML = `
+        <style>
+          .copy-content { color: #fff; font-size: 14px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+          .copy-content h1 { font-size: 24px; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 10px; }
+          .copy-content h2 { font-size: 20px; margin-bottom: 10px; padding-top: 14px; }
+          .copy-content h3 { font-size: 16px; margin-bottom: 6px; }
+          .copy-content p { margin-bottom: 10px; color: rgba(255,255,255,0.85); }
+          .copy-content ul, .copy-content ol { padding-left: 20px; margin-bottom: 10px; }
+          .copy-content li { margin-bottom: 6px; }
+          .copy-content code { background: rgba(102,126,234,0.2); padding: 2px 4px; border-radius: 4px; font-family: monospace; font-size: 12px; }
+          .copy-content pre { background: rgba(0,0,0,0.4); padding: 12px; border-radius: 6px; overflow-x: auto; margin-bottom: 10px; white-space: pre-wrap; word-break: break-all; }
+          .copy-content table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 12px; }
+          .copy-content th, .copy-content td { padding: 6px 8px; text-align: left; border: 1px solid rgba(255,255,255,0.2); }
+          .copy-content th { background: rgba(102,126,234,0.2); font-weight: 600; }
+          .copy-content blockquote { border-left: 4px solid #667eea; padding-left: 12px; margin: 10px 0; color: rgba(255,255,255,0.7); background: rgba(102,126,234,0.05); padding: 10px 12px; border-radius: 0 6px 6px 0; }
+        </style>
+        <div class="copy-content">${htmlContent}</div>
+      `
+      document.body.appendChild(tempContainer)
+      
+      const copyContent = tempContainer.querySelector('.copy-content') as HTMLElement | null
+      if (copyContent) {
+        const renderedHtml = copyContent.innerHTML
+        const plainText = copyContent.innerText
+
+        // 使用 Clipboard API 写入富文本和纯文本
+        const blobHtml = new Blob([renderedHtml], { type: 'text/html' })
+        const blobPlain = new Blob([plainText], { type: 'text/plain' })
+        const clipboardItem = new ClipboardItem({
+          'text/html': blobHtml,
+          'text/plain': blobPlain
+        })
+        await navigator.clipboard.write([clipboardItem])
+      } else {
+        // 如果无法获取渲染内容，直接写入纯文本
+        await navigator.clipboard.writeText(allContent)
+      }
+      
+      document.body.removeChild(tempContainer)
+      setCopyDone(true)
+      setTimeout(() => setCopyDone(false), 2000)
+    } catch (error) {
+      console.error('Copy failed:', error)
+      // 失败时尝试纯文本复制
+      try {
+        const allContent = generatedOutput || (rawOutput || output)
+        await navigator.clipboard.writeText(allContent)
+        setCopyDone(true)
+        setTimeout(() => setCopyDone(false), 2000)
+      } catch (fallbackError) {
+        console.error('Fallback copy also failed:', fallbackError)
+      }
+    }
   }
 
   const handleDownload = () => {
@@ -708,6 +935,16 @@ ${workflow.detail}
     URL.revokeObjectURL(url)
   }
 
+  const handleDownloadPDF = async () => {
+    const content = rawOutput || output
+    if (!content.trim()) {
+      alert('没有可导出的内容')
+      return
+    }
+
+    alert('已测试，下载一章平均时间10小时，看官请留在本站看叭。\n\n可按复制按钮复制富文本，粘贴到word文档。')
+  }
+
   const handleClear = () => {
     setOutput('')
     setRawOutput('')
@@ -720,10 +957,13 @@ ${workflow.detail}
 
   const isGenerating = loading || isRunning
 
+  // 知识输出页面不显示灰屏（只在细纲阶段并行生成时显示）
+  const isOutlineGenerating = workflow.parallelMode && workflow.currentStep === 'detail' && isRunning
+
   return (
     <div className="knowledge-output-page">
-      <div className={`main-content ${isGenerating ? 'grayed-out' : ''}`}>
-        {isGenerating && (
+      <div className={`main-content ${isOutlineGenerating ? 'grayed-out' : ''}`}>
+        {isOutlineGenerating && (
           <div className="gray-overlay">
             <div className="loading-indicator">
               <Loader2 className="loader" size={24} />
@@ -742,6 +982,108 @@ ${workflow.detail}
             生成完整、专业的知识内容，支持 Markdown 和 LaTeX 公式
           </p>
         </div>
+
+        {isOutlineGenerating && (
+          <div className="input-section">
+            <div className="input-group">
+              <input
+                type="text"
+                className="input-field"
+                placeholder="请输入知识点，例如：牛顿第二定律、氧化还原反应..."
+                value={knowledge}
+                onChange={(event) => setKnowledge(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !isGenerating) {
+                    handleGenerate()
+                  }
+                }}
+              />
+
+              {isGenerating ? (
+                <button className="btn btn-danger generate-btn" onClick={handleStop}>
+                  <Square size={18} />
+                  停止
+                </button>
+              ) : workflow.enabled && detailChapters.length > 0 ? (
+                <button
+                  className="btn btn-primary generate-btn"
+                  onClick={handleGenerateAll}
+                >
+                  <Play size={18} />
+                  生成全部正文
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary generate-btn"
+                  onClick={handleGenerate}
+                  disabled={!knowledge.trim()}
+                >
+                  <Send size={18} />
+                  生成内容
+                </button>
+              )}
+            </div>
+
+            {workflow.enabled && (workflow.outline || workflow.detail) && (
+              <div className="workflow-hint">
+                <ArrowLeft size={14} />
+                <span>工作流即将完成，这是最后一步</span>
+              </div>
+            )}
+
+            {showSaved && (
+              <div className="auto-save-indicator">
+                <Check size={14} />
+                <span>已自动保存</span>
+              </div>
+            )}
+
+            {stopRequested && (
+              <div className="workflow-hint">
+                <Square size={14} />
+                <span>已停止当前知识输出生成</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {showError && apiError && (
+          <div className="error-toast" style={{
+            position: 'fixed',
+            top: '80px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(239, 68, 68, 0.95)',
+            color: '#fff',
+            padding: '16px 24px',
+            borderRadius: '12px',
+            zIndex: 1000,
+            maxWidth: '500px',
+            textAlign: 'center',
+            boxShadow: '0 4px 20px rgba(239, 68, 68, 0.4)',
+            backdropFilter: 'blur(10px)'
+          }}>
+            <div style={{ marginBottom: '8px', fontWeight: '600' }}>生成失败</div>
+            <div style={{ fontSize: '14px', marginBottom: '12px' }}>{apiError.message}</div>
+            <button
+              onClick={() => {
+                setShowError(false)
+                clearError()
+              }}
+              style={{
+                background: 'rgba(255,255,255,0.2)',
+                border: 'none',
+                color: '#fff',
+                padding: '6px 16px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '13px'
+              }}
+            >
+              确定
+            </button>
+          </div>
+        )}
 
         {workflow.enabled && detailChapters.length > 0 && (
           <div className="progress-section">
@@ -769,76 +1111,7 @@ ${workflow.detail}
           </div>
         )}
 
-        <div className="input-section">
-          <div className="input-group">
-            <input
-              type="text"
-              className="input-field"
-              placeholder="请输入知识点，例如：牛顿第二定律、氧化还原反应..."
-              value={knowledge}
-              onChange={(event) => setKnowledge(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !isGenerating) {
-                  handleGenerate()
-                }
-              }}
-            />
-
-            {isGenerating ? (
-              <button className="btn btn-danger generate-btn" onClick={handleStop}>
-                <Square size={18} />
-                停止
-              </button>
-            ) : workflow.enabled && detailChapters.length > 0 ? (
-              <button
-                className="btn btn-primary generate-btn"
-                onClick={handleGenerateAll}
-              >
-                <Play size={18} />
-                生成全部正文
-              </button>
-            ) : (
-              <button
-                className="btn btn-primary generate-btn"
-                onClick={handleGenerate}
-                disabled={!knowledge.trim()}
-              >
-                <Send size={18} />
-                生成内容
-              </button>
-            )}
-          </div>
-
-          {workflow.enabled && (workflow.outline || workflow.detail) && (
-            <div className="workflow-hint">
-              <ArrowLeft size={14} />
-              <span>工作流即将完成，这是最后一步</span>
-            </div>
-          )}
-
-          {showSaved && (
-            <div className="auto-save-indicator">
-              <Check size={14} />
-              <span>已自动保存</span>
-            </div>
-          )}
-
-          {stopRequested && (
-            <div className="workflow-hint">
-              <Square size={14} />
-              <span>已停止当前知识输出生成</span>
-            </div>
-          )}
-        </div>
-
-        <div className="system-prompt-section">
-          <h3 className="section-title">系统指令</h3>
-          <div className="prompt-content">
-            <pre>{systemPrompt}</pre>
-          </div>
-        </div>
-
-        {(output || rawOutput) && (
+        {(output || rawOutput || generatedOutput) && (
           <div className="output-section">
             <div className="section-header">
               <h3 className="section-title">生成的知识内容</h3>
@@ -853,13 +1126,27 @@ ${workflow.detail}
                 </button>
 
                 <button className="btn btn-secondary" onClick={handleCopy}>
-                  <Copy size={16} />
-                  复制
+                  {copyDone ? (
+                    <>
+                      <Check size={16} />
+                      已复制
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={16} />
+                      复制
+                    </>
+                  )}
                 </button>
 
                 <button className="btn btn-secondary" onClick={handleDownload}>
                   <Download size={16} />
-                  下载
+                  下载MD
+                </button>
+
+                <button className="btn btn-primary" onClick={handleDownloadPDF}>
+                  <FileText size={16} />
+                  下载PDF
                 </button>
 
                 <button className="btn btn-secondary" onClick={handleClear}>
@@ -870,17 +1157,56 @@ ${workflow.detail}
             </div>
 
             {showPreview ? (
-              <div className="markdown-preview">
+              <div className="markdown-preview" ref={markdownRef}>
                 <ReactMarkdown
-                  remarkPlugins={[remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
+                  remarkPlugins={[remarkMath, remarkGfm]}
+                  rehypePlugins={[rehypeKatex, rehypeRaw]}
                 >
-                  {rawOutput || output}
+                  {paginatedOutput || rawOutput || output}
                 </ReactMarkdown>
               </div>
             ) : (
               <div className="output-content">
-                <pre>{rawOutput || output}</pre>
+                <pre>{paginatedOutput || rawOutput || output}</pre>
+              </div>
+            )}
+
+            {totalPages > 1 && (
+              <div className="pagination">
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                  disabled={currentPage === 1}
+                >
+                  上一页
+                </button>
+                <span className="page-info">
+                  第 {currentPage} / {totalPages} 页
+                </span>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => handlePageChange(Math.min(totalPages, currentPage + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  下一页
+                </button>
+                
+                {outputChapters.length > 0 && (
+                  <select
+                    className="chapter-select"
+                    value={currentPage}
+                    onChange={(e) => handlePageChange(Number(e.target.value))}
+                  >
+                    {outputChapters.map((chapter, index) => {
+                      const page = Math.floor(index / itemsPerPage) + 1
+                      return (
+                        <option key={chapter} value={page}>
+                          第{page}页 - {chapter}
+                        </option>
+                      )
+                    })}
+                  </select>
+                )}
               </div>
             )}
           </div>

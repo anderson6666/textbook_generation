@@ -1,10 +1,23 @@
 import { useState, useEffect } from 'react'
-import { Save, RefreshCw, Globe, Palette, Bell, Database, Zap, Check, ExternalLink } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Save, RefreshCw, Globe, Palette, Bell, Database, Zap, Check, ExternalLink, Loader2, Shield } from 'lucide-react'
 import { useWorkflow } from '../context/WorkflowContext'
+import { useAgnesAPI } from '../hooks/useAgnesAPI'
+import { secureStorage } from '../utils/secureStorage'
 
 function Settings() {
-  const [apiKey, setApiKey] = useState(localStorage.getItem('agnesApiKey') || '')
-  const [apiUrl, setApiUrl] = useState(localStorage.getItem('agnesApiUrl') || 'https://apihub.agnes-ai.com/v1')
+  const navigate = useNavigate()
+  const [apiKey, setApiKey] = useState(secureStorage.getApiKey())
+  const [apiUrl, setApiUrl] = useState(secureStorage.getApiUrl())
+  
+  // 初始化时加载配置
+  useEffect(() => {
+    const config = secureStorage.loadConfig()
+    if (config) {
+      setApiKey(config.apiKey)
+      setApiUrl(config.apiUrl)
+    }
+  }, [])
   
   const [outlineApiKey, setOutlineApiKey] = useState(localStorage.getItem('outlineApiKey') || '')
   const [outlineApiUrl, setOutlineApiUrl] = useState(localStorage.getItem('outlineApiUrl') || '')
@@ -20,14 +33,45 @@ function Settings() {
   const [notifications, setNotifications] = useState(localStorage.getItem('notifications') === 'true')
   const [autoSave, setAutoSave] = useState(localStorage.getItem('autoSave') === 'true')
   const [showSaved, setShowSaved] = useState(false)
-  const { workflow, setWorkflowEnabled } = useWorkflow()
+  const [validating, setValidating] = useState(false)
+  const [validationResult, setValidationResult] = useState<'success' | 'error' | null>(null)
+  const [validationMessage, setValidationMessage] = useState('')
+  const [apiKeyModified, setApiKeyModified] = useState(false)
+  const { workflow, setWorkflowEnabled, setIsRunning, setCurrentStep } = useWorkflow()
+  const { validateApiKey, validateApiKeyWithConfig, apiError, clearError } = useAgnesAPI()
 
   useEffect(() => {
     if (!autoSave) return
     
-    const saveTimeout = setTimeout(() => {
-      localStorage.setItem('agnesApiKey', apiKey)
-      localStorage.setItem('agnesApiUrl', apiUrl)
+    const saveTimeout = setTimeout(async () => {
+      // 如果API Key有修改，先验证
+      if (apiKeyModified && apiKey && apiKey.trim()) {
+        clearError()
+        
+        // 直接使用当前输入的 apiKey 和 apiUrl 进行验证
+        const isValid = await validateApiKeyWithConfig(apiKey, apiUrl)
+        
+        if (isValid) {
+          // 验证通过后加密保存
+          secureStorage.saveConfig(apiKey, apiUrl)
+          setApiKeyModified(false)
+          setValidationResult('success')
+          setValidationMessage('API Key 验证通过，已加密保存')
+          setTimeout(() => setValidationResult(null), 3000)
+        } else {
+          setValidationResult('error')
+          setValidationMessage(apiError?.message || 'API Key 验证失败')
+          setApiKey('')
+          secureStorage.clearConfig()
+          localStorage.removeItem('agnesApiKey')
+          return
+        }
+      } else if (apiKey === '') {
+        secureStorage.clearConfig()
+        localStorage.removeItem('agnesApiKey')
+      }
+      
+      // 保存其他配置到 localStorage
       localStorage.setItem('outlineApiKey', outlineApiKey)
       localStorage.setItem('outlineApiUrl', outlineApiUrl)
       localStorage.setItem('detailApiKey', detailApiKey)
@@ -43,11 +87,43 @@ function Settings() {
     }, 500)
 
     return () => clearTimeout(saveTimeout)
-  }, [apiKey, apiUrl, outlineApiKey, outlineApiUrl, detailApiKey, detailApiUrl, outputApiKey, outputApiUrl, theme, language, notifications, autoSave])
+  }, [apiKey, apiUrl, outlineApiKey, outlineApiUrl, detailApiKey, detailApiUrl, outputApiKey, outputApiUrl, theme, language, notifications, autoSave, apiKeyModified, validateApiKeyWithConfig, apiError, clearError])
 
-  const handleSave = () => {
-    localStorage.setItem('agnesApiKey', apiKey)
-    localStorage.setItem('agnesApiUrl', apiUrl)
+  const handleSave = async () => {
+    // 如果填写了API Key，先验证
+    if (apiKey && apiKey.trim()) {
+      setValidating(true)
+      setValidationResult(null)
+      clearError()
+      
+      // 使用安全存储保存以便验证
+      secureStorage.saveConfig(apiKey, apiUrl)
+      
+      const isValid = await validateApiKey()
+      
+      if (isValid) {
+        setValidationResult('success')
+        setValidationMessage('API Key 验证通过，已加密保存')
+      } else {
+        setValidationResult('error')
+        setValidationMessage(apiError?.message || 'API Key 验证失败')
+        setApiKey('')
+        secureStorage.clearConfig()
+        localStorage.removeItem('agnesApiKey')
+        setValidating(false)
+        return
+      }
+    } else if (apiKey === '') {
+      // 清除配置
+      secureStorage.clearConfig()
+      localStorage.removeItem('agnesApiKey')
+    }
+    
+    // 停止所有运行任务
+    setIsRunning(false)
+    setCurrentStep(null)
+    
+    // 保存其他配置到 localStorage
     localStorage.setItem('outlineApiKey', outlineApiKey)
     localStorage.setItem('outlineApiUrl', outlineApiUrl)
     localStorage.setItem('detailApiKey', detailApiKey)
@@ -58,8 +134,15 @@ function Settings() {
     localStorage.setItem('language', language)
     localStorage.setItem('notifications', notifications.toString())
     localStorage.setItem('autoSave', autoSave.toString())
+    
+    setValidating(false)
     setShowSaved(true)
-    setTimeout(() => setShowSaved(false), 2000)
+    setTimeout(() => {
+      setShowSaved(false)
+      setValidationResult(null)
+      // 返回首页
+      navigate('/')
+    }, 1500)
   }
 
   const handleReset = () => {
@@ -83,9 +166,31 @@ function Settings() {
 
   return (
     <div className="settings-page">
+      {validationResult && (
+        <div className={`validation-message ${validationResult}`}>
+          {validationResult === 'success' ? (
+            <>
+              <Check size={16} />
+              {validationMessage}
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize: '16px' }}>⚠</span>
+              {validationMessage}
+            </>
+          )}
+        </div>
+      )}
+      
       <div className="page-header">
         <h1 className="page-title">设置</h1>
         <p className="page-desc">配置Agnes AI API和编辑器偏好设置</p>
+      </div>
+
+      <div className="security-badge">
+        <Shield size={20} />
+        <span>国防级加密保护</span>
+        <span className="security-detail">API Key采用AES-256加密存储，保护您的密钥安全</span>
       </div>
 
       <div className="settings-grid">
@@ -102,7 +207,10 @@ function Settings() {
               className="input-field"
               placeholder="请输入Agnes AI API Key"
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => {
+                setApiKey(e.target.value)
+                setApiKeyModified(true)
+              }}
             />
             <a 
               href="https://platform.agnes-ai.com/" 
@@ -322,6 +430,7 @@ function Settings() {
         <button 
           className="btn btn-secondary"
           onClick={handleReset}
+          disabled={validating}
         >
           <RefreshCw size={16} />
           重置默认
@@ -329,9 +438,24 @@ function Settings() {
         <button 
           className="btn btn-primary"
           onClick={handleSave}
+          disabled={validating}
         >
-          {showSaved ? <Check size={16} /> : <Save size={16} />}
-          {showSaved ? '已保存' : '保存设置'}
+          {validating ? (
+            <>
+              <Loader2 size={16} className="spin" />
+              验证中...
+            </>
+          ) : showSaved ? (
+            <>
+              <Check size={16} />
+              已保存
+            </>
+          ) : (
+            <>
+              <Save size={16} />
+              保存设置
+            </>
+          )}
         </button>
       </div>
     </div>

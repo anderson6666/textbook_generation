@@ -4,19 +4,26 @@
   "description": "终身学习者的教科书编辑器",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && node node_modules/vite/bin/vite.js build",
+    "build": "npx tsc && node node_modules/vite/bin/vite.js build",
     "preview": "vite preview",
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "@rollup/rollup-win32-x64-msvc": "^4.61.1",
+    "@types/react-window": "^1.8.8",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
     "katex": "^0.16.9",
     "lucide-react": "^0.294.0",
-    "marked": "^11.1.1",
+    "marked": "^11.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^6.20.0",
+    "react-window": "^2.2.7",
     "rehype-katex": "^7.0.1",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0"
   },
   "devDependencies": {

@@ -1,9 +1,11 @@
 import { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react'
+import { indexedDBStorage } from '../utils/indexedDB'
 
 interface WorkflowState {
   enabled: boolean
   currentStep: 'outline' | 'detail' | 'output' | null
   currentChapterIndex: number
+  currentOutputIndex: number
   outline: string
   outlineChapters: string[]
   detail: string
@@ -11,41 +13,59 @@ interface WorkflowState {
   output: string
   outputSections: Record<string, string>
   isRunning: boolean
+  parallelMode: boolean
+  detailAheadCount: number
+  parallelTaskCount: number
+  maxParallelTasks: number
+  runningDetailTasks: string[]
+  runningOutputTasks: string[]
+  generatedPrompt: string
 }
 
 interface WorkflowHistory {
-  timestamp: number
   topic: string
+  timestamp: number
   outline: string
   outlineChapters: string[]
   detailSections: Record<string, string>
   output: string
   outputSections: Record<string, string>
+  generatedPrompt: string
 }
 
 interface WorkflowContextType {
   workflow: WorkflowState
   history: WorkflowHistory[]
+  initialized: boolean
   setWorkflowEnabled: (enabled: boolean) => void
+  setCurrentStep: (step: 'outline' | 'detail' | 'output' | null) => void
+  setCurrentChapterIndex: (index: number) => void
+  setCurrentOutputIndex: (index: number) => void
   updateOutline: (outline: string) => void
   updateOutlineChapters: (chapters: string[]) => void
   updateDetail: (chapter: string, detail: string) => void
   updateOutput: (output: string) => void
   updateOutputSection: (chapter: string, content: string) => void
-  setCurrentStep: (step: 'outline' | 'detail' | 'output' | null) => void
-  setCurrentChapterIndex: (index: number) => void
   setIsRunning: (running: boolean) => void
+  setParallelMode: (enabled: boolean) => void
+  setDetailAheadCount: (count: number) => void
+  addRunningDetailTask: (chapter: string) => void
+  removeRunningDetailTask: (chapter: string) => void
+  addRunningOutputTask: (chapter: string) => void
+  removeRunningOutputTask: (chapter: string) => void
   resetWorkflow: () => void
   saveToHistory: (topic: string) => void
   loadFromHistory: (index: number) => void
   deleteHistory: (index: number) => void
   clearCurrentProgress: () => void
+  setGeneratedPrompt: (prompt: string) => void
 }
 
 const initialState: WorkflowState = {
   enabled: false,
   currentStep: null,
   currentChapterIndex: 0,
+  currentOutputIndex: 0,
   outline: '',
   outlineChapters: [],
   detail: '',
@@ -53,76 +73,150 @@ const initialState: WorkflowState = {
   output: '',
   outputSections: {},
   isRunning: false,
+  parallelMode: false,
+  detailAheadCount: 3,
+  parallelTaskCount: 0,
+  maxParallelTasks: 4,
+  runningDetailTasks: [],
+  runningOutputTasks: [],
+  generatedPrompt: '',
 }
 
 const WorkflowContext = createContext<WorkflowContextType | undefined>(undefined)
 
 export function WorkflowProvider({ children }: { children: ReactNode }) {
-  // 从localStorage加载保存的状态
-  const [workflow, setWorkflow] = useState<WorkflowState>(() => {
-    const saved = localStorage.getItem('workflowEnabled')
-    const savedProgress = localStorage.getItem('workflowProgress')
-    
-    if (savedProgress) {
+  const [workflow, setWorkflow] = useState<WorkflowState>(initialState)
+  const [history, setHistory] = useState<WorkflowHistory[]>([])
+  const [initialized, setInitialized] = useState(false)
+
+  useEffect(() => {
+    const initializeData = async () => {
       try {
-        const parsed = JSON.parse(savedProgress)
-        return {
-          ...initialState,
-          enabled: saved === 'true',
-          ...parsed,
-          // 确保新字段有默认值
-          outputSections: parsed.outputSections || {},
+        const savedProgress = await indexedDBStorage.getItem('workflowProgress')
+        const savedHistory = await indexedDBStorage.getItem('workflowHistory')
+        const savedEnabled = await indexedDBStorage.getItem('workflowEnabled')
+
+        if (savedProgress) {
+          try {
+            const parsed = JSON.parse(savedProgress) as {
+              outlineChapters?: string[]
+              detailSections?: Record<string, string>
+              outputSections?: Record<string, string>
+              generatedPrompt?: string
+              currentStep?: 'outline' | 'detail' | 'output' | null
+              [key: string]: unknown
+            }
+            
+            const validChapters = new Set(parsed.outlineChapters?.filter((ch: string) => ch && ch.trim()) || [])
+            
+            const filteredDetailSections: Record<string, string> = {}
+            const filteredOutputSections: Record<string, string> = {}
+            
+            for (const [chapter, content] of Object.entries(parsed.detailSections || {})) {
+              if (validChapters.has(chapter) && typeof content === 'string') {
+                filteredDetailSections[chapter] = content
+              }
+            }
+            
+            for (const [chapter, content] of Object.entries(parsed.outputSections || {})) {
+              if (validChapters.has(chapter) && typeof content === 'string') {
+                filteredOutputSections[chapter] = content
+              }
+            }
+            
+            const hasOutline = parsed.outline && typeof parsed.outline === 'string' && parsed.outline.trim().length > 0
+            const hasDetail = Object.keys(filteredDetailSections).length > 0
+            const hasOutput = Object.keys(filteredOutputSections).length > 0
+            
+            // 只有当有对应步骤的实际内容时才恢复 currentStep，避免状态不一致
+            const savedStep = parsed.currentStep as 'outline' | 'detail' | 'output' | null
+            let shouldRestoreStep = false
+            if (savedStep === 'outline' && hasOutline) {
+              shouldRestoreStep = true
+            } else if (savedStep === 'detail' && hasDetail) {
+              shouldRestoreStep = true
+            } else if (savedStep === 'output' && hasOutput) {
+              shouldRestoreStep = true
+            }
+            
+            setWorkflow(prev => ({
+              ...prev,
+              ...parsed,
+              detailSections: filteredDetailSections,
+              outputSections: filteredOutputSections,
+              enabled: savedEnabled === 'true',
+              isRunning: false,
+              currentStep: shouldRestoreStep ? savedStep : null,
+              generatedPrompt: parsed.generatedPrompt || '',
+            }))
+          } catch {
+            console.warn('Failed to parse saved progress')
+          }
         }
-      } catch {
-        return {
-          ...initialState,
-          enabled: saved === 'true',
+
+        if (savedHistory) {
+          try {
+            setHistory(JSON.parse(savedHistory))
+          } catch {
+            console.warn('Failed to parse saved history')
+          }
         }
+      } catch (error) {
+        console.error('Error during initialization:', error)
+      } finally {
+        setInitialized(true)
       }
     }
-    
-    return {
-      ...initialState,
-      enabled: saved === 'true',
-    }
-  })
 
-  // 从localStorage加载历史
-  const [history, setHistory] = useState<WorkflowHistory[]>(() => {
-    const savedHistory = localStorage.getItem('workflowHistory')
-    if (savedHistory) {
-      try {
-        return JSON.parse(savedHistory)
-      } catch {
-        return []
+    initializeData()
+  }, [])
+
+  useEffect(() => {
+    if (!initialized) return
+
+    const saveProgress = async () => {
+      const progressToSave = {
+        currentStep: workflow.currentStep,
+        currentChapterIndex: workflow.currentChapterIndex,
+        currentOutputIndex: workflow.currentOutputIndex,
+        outline: workflow.outline,
+        outlineChapters: workflow.outlineChapters,
+        detail: workflow.detail,
+        detailSections: workflow.detailSections,
+        output: workflow.output,
+        outputSections: workflow.outputSections,
+        parallelMode: workflow.parallelMode,
+        detailAheadCount: workflow.detailAheadCount,
+        generatedPrompt: workflow.generatedPrompt,
       }
+      await indexedDBStorage.setItem('workflowProgress', JSON.stringify(progressToSave))
+      await indexedDBStorage.setItem('workflowEnabled', workflow.enabled.toString())
     }
-    return []
-  })
 
-  // 自动保存工作流进度
-  useEffect(() => {
-    const progressToSave = {
-      currentStep: workflow.currentStep,
-      currentChapterIndex: workflow.currentChapterIndex,
-      outline: workflow.outline,
-      outlineChapters: workflow.outlineChapters,
-      detail: workflow.detail,
-      detailSections: workflow.detailSections,
-      output: workflow.output,
-      outputSections: workflow.outputSections,
-    }
-    localStorage.setItem('workflowProgress', JSON.stringify(progressToSave))
-  }, [workflow.currentStep, workflow.currentChapterIndex, workflow.outline, workflow.outlineChapters, workflow.detail, workflow.detailSections, workflow.output, workflow.outputSections])
+    saveProgress()
+  }, [workflow, initialized])
 
-  // 保存历史到localStorage
   useEffect(() => {
-    localStorage.setItem('workflowHistory', JSON.stringify(history))
-  }, [history])
+    if (!initialized) return
+
+    // 保存所有历史记录（无限制）
+    indexedDBStorage.setItem('workflowHistory', JSON.stringify(history))
+  }, [history, initialized])
 
   const setWorkflowEnabled = useCallback((enabled: boolean) => {
     setWorkflow(prev => ({ ...prev, enabled }))
-    localStorage.setItem('workflowEnabled', enabled.toString())
+  }, [])
+
+  const setCurrentStep = useCallback((step: 'outline' | 'detail' | 'output' | null) => {
+    setWorkflow(prev => ({ ...prev, currentStep: step }))
+  }, [])
+
+  const setCurrentChapterIndex = useCallback((index: number) => {
+    setWorkflow(prev => ({ ...prev, currentChapterIndex: index }))
+  }, [])
+
+  const setCurrentOutputIndex = useCallback((index: number) => {
+    setWorkflow(prev => ({ ...prev, currentOutputIndex: index }))
   }, [])
 
   const updateOutline = useCallback((outline: string) => {
@@ -130,7 +224,16 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const updateOutlineChapters = useCallback((chapters: string[]) => {
-    setWorkflow(prev => ({ ...prev, outlineChapters: chapters, currentChapterIndex: 0 }))
+    setWorkflow(prev => {
+      return { 
+        ...prev, 
+        outlineChapters: chapters, 
+        currentChapterIndex: 0,
+        detailSections: {},
+        outputSections: {},
+        output: '',
+      }
+    })
   }, [])
 
   const updateDetail = useCallback((chapter: string, detail: string) => {
@@ -158,99 +261,113 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
-  const setCurrentStep = useCallback((step: 'outline' | 'detail' | 'output' | null) => {
-    setWorkflow(prev => ({ ...prev, currentStep: step }))
-  }, [])
-
-  const setCurrentChapterIndex = useCallback((index: number) => {
-    setWorkflow(prev => ({ ...prev, currentChapterIndex: index }))
-  }, [])
-
   const setIsRunning = useCallback((running: boolean) => {
     setWorkflow(prev => ({ ...prev, isRunning: running }))
   }, [])
 
-  const resetWorkflow = useCallback(() => {
-    setWorkflow(prev => ({
-      ...prev,
-      currentStep: null,
-      currentChapterIndex: 0,
-      outline: '',
-      outlineChapters: [],
-      detail: '',
-      detailSections: {},
-      output: '',
-      outputSections: {},
-      isRunning: false,
-    }))
-    localStorage.removeItem('workflowProgress')
+  const setParallelMode = useCallback((enabled: boolean) => {
+    setWorkflow(prev => ({ ...prev, parallelMode: enabled }))
   }, [])
 
-  const clearCurrentProgress = useCallback(() => {
+  const setDetailAheadCount = useCallback((count: number) => {
+    setWorkflow(prev => ({ ...prev, detailAheadCount: count }))
+  }, [])
+
+  const addRunningDetailTask = useCallback((chapter: string) => {
     setWorkflow(prev => ({
       ...prev,
-      currentStep: null,
-      currentChapterIndex: 0,
-      outline: '',
-      outlineChapters: [],
-      detail: '',
-      detailSections: {},
-      output: '',
-      outputSections: {},
-      isRunning: false,
+      runningDetailTasks: [...prev.runningDetailTasks, chapter],
+      parallelTaskCount: prev.parallelTaskCount + 1,
     }))
-    localStorage.removeItem('workflowProgress')
+  }, [])
+
+  const removeRunningDetailTask = useCallback((chapter: string) => {
+    setWorkflow(prev => ({
+      ...prev,
+      runningDetailTasks: prev.runningDetailTasks.filter(t => t !== chapter),
+      parallelTaskCount: Math.max(0, prev.parallelTaskCount - 1),
+    }))
+  }, [])
+
+  const addRunningOutputTask = useCallback((chapter: string) => {
+    setWorkflow(prev => ({
+      ...prev,
+      runningOutputTasks: [...prev.runningOutputTasks, chapter],
+      parallelTaskCount: prev.parallelTaskCount + 1,
+    }))
+  }, [])
+
+  const removeRunningOutputTask = useCallback((chapter: string) => {
+    setWorkflow(prev => ({
+      ...prev,
+      runningOutputTasks: prev.runningOutputTasks.filter(t => t !== chapter),
+      parallelTaskCount: Math.max(0, prev.parallelTaskCount - 1),
+    }))
+  }, [])
+
+  const resetWorkflow = useCallback(() => {
+    setWorkflow({ ...initialState, enabled: false })
   }, [])
 
   const saveToHistory = useCallback((topic: string) => {
-    const newHistory: WorkflowHistory = {
-      timestamp: Date.now(),
+    const newHistoryItem: WorkflowHistory = {
       topic,
+      timestamp: Date.now(),
       outline: workflow.outline,
       outlineChapters: workflow.outlineChapters,
       detailSections: workflow.detailSections,
       output: workflow.output,
       outputSections: workflow.outputSections,
+      generatedPrompt: workflow.generatedPrompt,
     }
-    setHistory(prev => [newHistory, ...prev].slice(0, 20)) // 保留最近20条
-  }, [workflow.outline, workflow.outlineChapters, workflow.detailSections, workflow.output, workflow.outputSections])
+    setHistory(prev => {
+      const filtered = prev.filter(item => item.topic !== topic)
+      return [...filtered, newHistoryItem]
+    })
+  }, [workflow])
 
   const loadFromHistory = useCallback((index: number) => {
     const item = history[index]
     if (item) {
-      const outlineChapters = item.outlineChapters || []
-      const detailSections = item.detailSections || {}
+      const hasDetail = Object.keys(item.detailSections).length > 0
+      const hasOutput = Object.keys(item.outputSections).length > 0
+      let step: 'outline' | 'detail' | 'output' | null = 'outline'
       
-      // 找到第一个未生成细纲的小节
-      let nextChapterIndex = 0
-      let nextStep: 'outline' | 'detail' | 'output' | null = 'outline'
+      if (hasOutput && hasDetail) {
+        step = 'output'
+      } else if (hasDetail) {
+        step = 'detail'
+      } else {
+        step = 'outline'
+      }
+
+      const validChapters = new Set(item.outlineChapters.filter(ch => ch && ch.trim()))
       
-      if (outlineChapters.length > 0) {
-        // 查找第一个没有细纲的小节
-        const firstMissingIndex = outlineChapters.findIndex(
-          (chapter) => !detailSections[chapter]
-        )
-        
-        if (firstMissingIndex === -1) {
-          // 所有小节都有细纲，检查是否有输出
-          nextChapterIndex = outlineChapters.length - 1
-          nextStep = 'output'
-        } else {
-          nextChapterIndex = firstMissingIndex
-          nextStep = 'detail'
+      const filteredDetailSections: Record<string, string> = {}
+      const filteredOutputSections: Record<string, string> = {}
+      
+      for (const [chapter, content] of Object.entries(item.detailSections)) {
+        if (validChapters.has(chapter)) {
+          filteredDetailSections[chapter] = content
+        }
+      }
+      
+      for (const [chapter, content] of Object.entries(item.outputSections)) {
+        if (validChapters.has(chapter)) {
+          filteredOutputSections[chapter] = content
         }
       }
       
       setWorkflow(prev => ({
         ...prev,
+        enabled: true,
         outline: item.outline,
-        outlineChapters: outlineChapters,
-        detailSections: detailSections,
+        outlineChapters: item.outlineChapters,
+        detailSections: filteredDetailSections,
         output: item.output,
-        outputSections: item.outputSections || {},
-        currentStep: nextStep,
-        currentChapterIndex: nextChapterIndex,
-        isRunning: false,
+        outputSections: filteredOutputSections,
+        currentStep: step,
+        generatedPrompt: item.generatedPrompt || '',
       }))
     }
   }, [history])
@@ -259,25 +376,43 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setHistory(prev => prev.filter((_, i) => i !== index))
   }, [])
 
+  const clearCurrentProgress = useCallback(() => {
+    indexedDBStorage.removeItem('workflowProgress')
+    setWorkflow({ ...initialState, enabled: false })
+  }, [])
+
+  const setGeneratedPrompt = useCallback((prompt: string) => {
+    setWorkflow(prev => ({ ...prev, generatedPrompt: prompt }))
+  }, [])
+
   return (
     <WorkflowContext.Provider
       value={{
         workflow,
         history,
+        initialized,
         setWorkflowEnabled,
+        setCurrentStep,
+        setCurrentChapterIndex,
+        setCurrentOutputIndex,
         updateOutline,
         updateOutlineChapters,
         updateDetail,
         updateOutput,
         updateOutputSection,
-        setCurrentStep,
-        setCurrentChapterIndex,
         setIsRunning,
+        setParallelMode,
+        setDetailAheadCount,
+        addRunningDetailTask,
+        removeRunningDetailTask,
+        addRunningOutputTask,
+        removeRunningOutputTask,
         resetWorkflow,
         saveToHistory,
         loadFromHistory,
         deleteHistory,
         clearCurrentProgress,
+        setGeneratedPrompt,
       }}
     >
       {children}
@@ -288,7 +423,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 export function useWorkflow() {
   const context = useContext(WorkflowContext)
   if (!context) {
-    throw new Error('useWorkflow must be used within a WorkflowProvider')
+    throw new Error('useWorkflow must be used within WorkflowProvider')
   }
   return context
 }

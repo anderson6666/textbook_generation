@@ -15,32 +15,42 @@ function Sidebar() {
   
   // 计算总体进度
   const calculateProgress = () => {
-    if (!workflow.enabled || !workflow.currentStep) return 0
+    if (!workflow.enabled) return 0
+    
+    // 根据已有内容计算进度，不受 currentStep 影响
+    const hasOutline = !!workflow.outline && workflow.outline.trim()
+    const detailCount = Object.keys(workflow.detailSections).length
+    const totalChapters = workflow.outlineChapters.length
+    const outputCount = Object.keys(workflow.outputSections).length
     
     // 大纲完成 = 33%
     // 细纲完成 = 33% - 66%
     // 知识输出完成 = 66% - 100%
     
-    if (workflow.currentStep === 'outline') {
-      return workflow.outline ? 33 : 10
+    if (!hasOutline) {
+      return 0
     }
     
-    if (workflow.currentStep === 'detail') {
-      const detailProgress = workflow.outlineChapters.length > 0 
-        ? (workflow.currentChapterIndex / workflow.outlineChapters.length) * 33 
+    if (detailCount === 0) {
+      return 33
+    }
+    
+    if (outputCount === 0) {
+      const detailProgress = totalChapters > 0 
+        ? (detailCount / totalChapters) * 33 
         : 0
       return 33 + detailProgress
     }
     
-    if (workflow.currentStep === 'output') {
-      return workflow.output ? 100 : 66
-    }
-    
-    return 0
+    const outputProgress = totalChapters > 0 
+      ? (outputCount / totalChapters) * 34 
+      : 0
+    return 66 + outputProgress
   }
   
   const progress = calculateProgress()
-  const isRunning = workflow.enabled && workflow.currentStep
+  // output 步骤不显示加载状态（知识输出是展示成果的）
+  const isRunning = workflow.enabled && workflow.currentStep && workflow.currentStep !== 'output'
 
   return (
     <aside className={`sidebar ${isRunning ? 'sidebar-working' : ''}`}>
@@ -62,7 +72,6 @@ function Sidebar() {
               <Loader2 className="workflow-spinner" size={14} />
               <span className="workflow-progress-text">
                 {workflow.currentStep === 'outline' && '生成大纲...'}
-                {workflow.currentStep === 'detail' && `处理细纲 ${workflow.currentChapterIndex + 1}/${workflow.outlineChapters.length}`}
                 {workflow.currentStep === 'output' && '生成知识输出...'}
               </span>
             </div>
@@ -78,8 +87,9 @@ function Sidebar() {
             (item.step === 'detail' && Object.keys(workflow.detailSections).length > 0) ||
             (item.step === 'output' && workflow.output)
           
-          // 工作流运行时，非当前步骤不可点击
-          const isDisabled = isRunning && !isCurrentStep
+          // 工作流运行时，非当前步骤不可点击，但可以点击首页和设置
+          const isCorePage = item.path === '/' || item.path === '/settings'
+          const isDisabled = isRunning && !isCurrentStep && !isCorePage
           
           return (
             <NavLink

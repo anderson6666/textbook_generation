@@ -3,6 +3,7 @@ import { Send, ChevronDown, ChevronRight, BookOpen, Trash2, Square, Play } from 
 import { useAgnesAPI } from '../hooks/useAgnesAPI'
 import { useWorkflow } from '../context/WorkflowContext'
 import { useNavigate } from 'react-router-dom'
+import { secureStorage } from '../utils/secureStorage'
 
 interface OutlineNode {
   id: string
@@ -22,6 +23,7 @@ const systemPrompt = `
 4. **足够深度与广度**：知识是复杂的，每个主题应包含**不少于8-12章**，每章**不少于6-10节**，每节**不少于4-8小节**，确保知识框架的深度和广度
 5. **严密逻辑连贯**：章节之间要有**清晰的逻辑顺序**，从基础到进阶，从理论到实践，从宏观到微观，层层递进
 6. **知识颗粒度细化**：小节作为知识的最小单元，必须**足够细化**，确保每个知识点都能独立展开为详细内容
+7. **权重**：如果与生活有关的，尽量脱离量化，而是与生活技巧贴合。如果是与量化考试有关的，尽量与考点贴合。
 
 输出格式要求：
 1. 使用Markdown标题格式（# 一级标题，## 二级标题，### 三级标题）
@@ -124,10 +126,12 @@ function Outline() {
   const [topic, setTopic] = useState('')
   const [outline, setOutline] = useState<OutlineNode[]>([])
   const [isExpanded, setIsExpanded] = useState(true)
-  const { loading, generateContent } = useAgnesAPI()
+  const { loading, generateContent, apiError, clearError } = useAgnesAPI()
   const { workflow, updateOutline, updateOutlineChapters, setCurrentStep, setIsRunning } = useWorkflow()
+  const isRunning = workflow.isRunning
   const navigate = useNavigate()
   const [stopRequested, setStopRequested] = useState(false)
+  const [showError, setShowError] = useState(false)
   const autoNavigateRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -135,6 +139,20 @@ function Outline() {
       if (autoNavigateRef.current) {
         clearTimeout(autoNavigateRef.current)
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (apiError && apiError.type === 'api') {
+      setShowError(true)
+      setIsRunning(false)
+    }
+  }, [apiError, setIsRunning])
+
+  useEffect(() => {
+    const apiKey = secureStorage.getApiKey()
+    if (!apiKey || !apiKey.trim()) {
+      console.warn('API Key not configured, please set it in settings')
     }
   }, [])
 
@@ -155,36 +173,52 @@ function Outline() {
   const handleGenerate = async () => {
     if (!topic.trim()) return
     
+    // 检查 API Key 是否配置
+    const apiKey = secureStorage.getApiKey()
+    if (!apiKey || !apiKey.trim()) {
+      navigate('/settings')
+      return
+    }
+    
     setStopRequested(false)
     setIsRunning(true)
     setCurrentStep('outline')
     
+    // 清除之前的缓存，避免显示旧内容
+    localStorage.removeItem('lastKnowledgeOutput')
+    localStorage.removeItem('lastKnowledge')
+    
     const prompt = `${systemPrompt}\n\n学习主题：${topic}`
     const response = await generateContent(prompt)
     
+    // 检查停止请求
     if (stopRequested) {
       setIsRunning(false)
       return
     }
     
-    if (response) {
-      updateOutline(response)
-      const parsed = parseMarkdownToTree(response)
-      setOutline(parsed)
-      
-      // 解析所有小节（三级标题）
-      const chapters = extractChapters(response)
-      updateOutlineChapters(chapters)
-      
-      // 如果启用了工作流，自动跳转到细纲分点
-      if (workflow.enabled) {
-        autoNavigateRef.current = setTimeout(() => {
-          if (!stopRequested) {
-            setCurrentStep('detail')
-            navigate('/detail-outline')
-          }
-        }, 1000)
-      }
+    // 使用返回值判断是否成功，而不是依赖异步更新的 apiError 状态
+    if (!response) {
+      setIsRunning(false)
+      return
+    }
+    
+    updateOutline(response)
+    const parsed = parseMarkdownToTree(response)
+    setOutline(parsed)
+    
+    // 解析所有小节（三级标题）
+    const chapters = extractChapters(response)
+    updateOutlineChapters(chapters)
+    
+    // 如果启用了工作流，跳转到细纲分点
+    if (workflow.enabled) {
+      autoNavigateRef.current = setTimeout(() => {
+        if (!stopRequested) {
+          setCurrentStep('detail')
+          navigate('/detail-outline')
+        }
+      }, 1000)
     }
     
     setIsRunning(false)
@@ -194,6 +228,7 @@ function Outline() {
   const extractChapters = (markdown: string): string[] => {
     const lines = markdown.trim().split('\n')
     const chapters: string[] = []
+    const chapterCount: Record<string, number> = {}
     
     let currentChapter = ''
     
@@ -209,10 +244,15 @@ function Outline() {
       if (level3Match) {
         const section = level3Match[1].trim()
         // 如果有当前章，带上章名
-        if (currentChapter) {
-          chapters.push(`${currentChapter} - ${section}`)
+        const baseChapter = currentChapter ? `${currentChapter} - ${section}` : section
+        
+        // 处理重复章节
+        if (chapterCount[baseChapter] === undefined) {
+          chapterCount[baseChapter] = 1
+          chapters.push(baseChapter)
         } else {
-          chapters.push(section)
+          chapterCount[baseChapter]++
+          chapters.push(`${baseChapter}-${chapterCount[baseChapter]}`)
         }
       }
     })
@@ -305,7 +345,7 @@ function Outline() {
             onChange={(e) => setTopic(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && !loading && handleGenerate()}
           />
-          {loading ? (
+          {(loading || isRunning) ? (
             <button 
               className="btn btn-danger generate-btn"
               onClick={handleStop}
@@ -325,6 +365,44 @@ function Outline() {
           )}
         </div>
       </div>
+
+      {showError && apiError && (
+        <div className="error-toast" style={{
+          position: 'fixed',
+          top: '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(239, 68, 68, 0.95)',
+          color: '#fff',
+          padding: '16px 24px',
+          borderRadius: '12px',
+          zIndex: 1000,
+          maxWidth: '500px',
+          textAlign: 'center',
+          boxShadow: '0 4px 20px rgba(239, 68, 68, 0.4)',
+          backdropFilter: 'blur(10px)'
+        }}>
+          <div style={{ marginBottom: '8px', fontWeight: '600' }}>生成失败</div>
+          <div style={{ fontSize: '14px', marginBottom: '12px' }}>{apiError.message}</div>
+          <button
+            onClick={() => {
+              setShowError(false)
+              clearError()
+            }}
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              color: '#fff',
+              padding: '6px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px'
+            }}
+          >
+            确定
+          </button>
+        </div>
+      )}
 
       <div className="system-prompt-section">
         <h3 className="section-title">系统指令</h3>

@@ -19,12 +19,16 @@
 
 .sidebar-header {
   padding: 0 20px 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .logo {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .logo-icon {
@@ -42,8 +46,11 @@
 .workflow-status {
   margin-top: 16px;
   padding: 12px;
-  background: rgba(102, 126, 234, 0.1);
+  background: rgba(102, 126, 234, 0.15);
   border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .workflow-progress-bar {
@@ -83,7 +90,20 @@
 
 .workflow-progress-text {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
+  color: #fff;
+  font-weight: 500;
+}
+
+.workflow-progress-info.parallel-output {
+  margin-top: 4px;
+}
+
+.workflow-progress-info.parallel-output .workflow-spinner {
+  color: #48bb78;
+}
+
+.workflow-progress-info.parallel-output .workflow-progress-text {
+  color: #a0e7a0;
 }
 
 .sidebar-nav {
@@ -185,15 +205,30 @@
   .workflow-status {
     margin-top: 0;
     margin-left: auto;
-    padding: 8px 12px;
+    padding: 6px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   
   .workflow-progress-bar {
     display: none;
   }
   
+  .workflow-progress-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  
   .workflow-progress-text {
     font-size: 11px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .workflow-spinner {
+    width: 14px;
+    height: 14px;
   }
   
   .sidebar-nav {
@@ -225,6 +260,16 @@
   .nav-icon {
     width: 18px;
     height: 18px;
+    color: #a0aec0;
+  }
+  
+  .nav-item:hover .nav-icon,
+  .nav-item.active .nav-icon {
+    color: #fff;
+  }
+  
+  .nav-item.completed .nav-icon {
+    color: #22c55e;
   }
   
   .sidebar-footer {
@@ -262,5 +307,15 @@
   .nav-icon {
     width: 16px;
     height: 16px;
+    color: #a0aec0;
+  }
+  
+  .nav-item:hover .nav-icon,
+  .nav-item.active .nav-icon {
+    color: #fff;
+  }
+  
+  .nav-item.completed .nav-icon {
+    color: #22c55e;
   }
 }

@@ -1,6 +1,7 @@
 import { BookOpen, Sparkles, Zap, Target, ArrowRight, RotateCcw, History } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useWorkflow } from '../context/WorkflowContext'
+import { GlobalLoadingContext } from '../App'
 
 const features = [
   {
@@ -36,17 +37,58 @@ function Home() {
   const hasProgress = workflow.outline || Object.keys(workflow.detailSections).length > 0 || workflow.output
 
   const handleContinue = () => {
-    // 启用工作流
-    setWorkflowEnabled(true)
-    
-    if (workflow.currentStep === 'outline') {
-      navigate('/outline')
-    } else if (workflow.currentStep === 'detail') {
-      navigate('/detail-outline')
-    } else if (workflow.currentStep === 'output') {
-      navigate('/knowledge-output')
-    } else {
-      navigate('/outline')
+    try {
+      // 先设置工作流启用状态
+      setWorkflowEnabled(true)
+      
+      const hasOutline = workflow.outline && workflow.outline.trim()
+      const hasOutlineChapters = workflow.outlineChapters.length > 0
+      const hasDetailSections = Object.keys(workflow.detailSections).length > 0
+      
+      // 判断细纲是否全部完成
+      const detailCompleted = hasOutlineChapters && (Object.keys(workflow.detailSections).length >= workflow.outlineChapters.length)
+      // 判断输出是否全部完成
+      const outputCompleted = detailCompleted && (Object.keys(workflow.outputSections).length >= workflow.outlineChapters.length)
+      
+      // 确定目标路径
+      let targetPath = '/outline'
+      
+      if (!detailCompleted && hasOutlineChapters) {
+        targetPath = '/detail-outline'
+      } else if (workflow.currentStep === 'output') {
+        targetPath = '/knowledge-output'
+      } else if (workflow.currentStep === 'detail') {
+        targetPath = '/detail-outline'
+      } else if (workflow.currentStep === 'outline') {
+        targetPath = '/outline'
+      } else {
+        // currentStep 为 null 时，根据已有内容判断
+        if (outputCompleted) {
+          targetPath = '/knowledge-output'
+        } else if (detailCompleted) {
+          targetPath = '/knowledge-output'
+        } else if (hasDetailSections) {
+          targetPath = '/detail-outline'
+        } else if (hasOutline) {
+          targetPath = '/outline'
+        }
+      }
+      
+      // 先导航，确保用户能看到页面切换
+      navigate(targetPath)
+      
+      // 导航完成后再设置加载状态
+      setTimeout(() => {
+        GlobalLoadingContext.setGlobalLoading(true)
+      }, 100)
+      
+      // 1秒后关闭加载状态
+      setTimeout(() => {
+        GlobalLoadingContext.setGlobalLoading(false)
+      }, 1000)
+    } catch (error) {
+      console.error('继续生成失败:', error)
+      GlobalLoadingContext.setGlobalLoading(false)
     }
   }
 
@@ -120,15 +162,31 @@ function Home() {
           <div className="progress-card">
             <div className="progress-info">
               <span className="progress-step">
-                {workflow.currentStep === 'outline' && '大纲目录'}
-                {workflow.currentStep === 'detail' && `细纲分点 (${workflow.currentChapterIndex + 1}/${workflow.outlineChapters.length})`}
-                {workflow.currentStep === 'output' && '知识输出'}
-                {!workflow.currentStep && '已暂停'}
+                {(() => {
+                  const hasOutline = !!workflow.outline && workflow.outline.trim()
+                  const detailCount = Object.keys(workflow.detailSections).length
+                  const totalChapters = workflow.outlineChapters.length
+                  const outputCount = Object.keys(workflow.outputSections).length
+                  
+                  if (!hasOutline) {
+                    return '大纲目录'
+                  }
+                  
+                  if (detailCount === 0) {
+                    return '大纲已完成'
+                  }
+                  
+                  if (outputCount === 0) {
+                    return `细纲分点 (${detailCount}/${totalChapters})`
+                  }
+                  
+                  return `知识输出 (${outputCount}/${totalChapters})`
+                })()}
               </span>
               <span className="progress-detail">
                 {workflow.outline && '大纲已生成'}
                 {Object.keys(workflow.detailSections).length > 0 && ` · ${Object.keys(workflow.detailSections).length}个细纲`}
-                {workflow.output && ' · 知识输出已完成'}
+                {Object.keys(workflow.outputSections).length > 0 && ` · ${Object.keys(workflow.outputSections).length}个知识输出`}
               </span>
             </div>
             <button onClick={handleContinue} className="btn btn-small">
@@ -145,15 +203,49 @@ function Home() {
             历史记录
           </h2>
           <div className="history-grid">
-            {history.slice(0, 6).map((item, index) => (
-              <div key={item.timestamp} className="history-card" onClick={() => {
-                loadFromHistory(index)
-                navigate('/outline')
-              }}>
-                <span className="history-topic">{item.topic}</span>
-                <span className="history-time">{formatDate(item.timestamp)}</span>
-              </div>
-            ))}
+            {[...history].reverse().slice(0, 6).map((item, displayIndex) => {
+              const actualIndex = history.length - 1 - displayIndex
+              return (
+                <div key={item.timestamp} className="history-card" onClick={() => {
+                  // 先启用工作流
+                  setWorkflowEnabled(true)
+                  GlobalLoadingContext.setGlobalLoading(true)
+                  loadFromHistory(actualIndex)
+                  
+                  // 根据历史记录的状态跳转到未完成的页面继续工作
+                  // 细纲与正文会并行工作，但优先完成细纲
+                  const hasOutline = item.outline && item.outline.trim()
+                  const hasOutlineChapters = item.outlineChapters && item.outlineChapters.length > 0
+                  const detailCount = item.detailSections ? Object.keys(item.detailSections).length : 0
+                  const outputCount = item.outputSections ? Object.keys(item.outputSections).length : 0
+                  const totalChapters = item.outlineChapters?.length || 0
+                  
+                  let targetPath = '/outline'
+                  
+                  // 按顺序检查：大纲 → 细纲 → 知识输出
+                  // 只要细纲未完成（输出数量少于章节数量），就跳转到细纲页面
+                  if (!hasOutline) {
+                    targetPath = '/outline'
+                  } else if (!hasOutlineChapters) {
+                    targetPath = '/outline'
+                  } else if (detailCount < totalChapters || outputCount < totalChapters) {
+                    // 细纲未完成，或者输出未完成，都跳转到细纲页面继续工作
+                    targetPath = '/detail-outline'
+                  } else {
+                    // 全部完成，跳转到知识输出页面展示结果
+                    targetPath = '/knowledge-output'
+                  }
+                  
+                  navigate(targetPath)
+                  setTimeout(() => {
+                    GlobalLoadingContext.setGlobalLoading(false)
+                  }, 500)
+                }}>
+                  <span className="history-topic">{item.topic}</span>
+                  <span className="history-time">{formatDate(item.timestamp)}</span>
+                </div>
+              )
+            })}
           </div>
         </section>
       )}

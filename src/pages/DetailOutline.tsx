@@ -3,6 +3,7 @@ import { Send, Trash2, Square, Play, ArrowLeft } from 'lucide-react'
 import { useAgnesAPI } from '../hooks/useAgnesAPI'
 import { useWorkflow } from '../context/WorkflowContext'
 import { useNavigate } from 'react-router-dom'
+import { secureStorage } from '../utils/secureStorage'
 
 const systemPrompt = `
 你是一位专业的知识拆解专家，擅长将复杂的知识点**极致完整、深入系统地**分解为最细粒度的细分要点。
@@ -15,6 +16,7 @@ const systemPrompt = `
 3. **专业深度**：每个要点都要有**具体的专业术语、精确的概念定义、完整的公式推导、详细的性质描述、典型的应用案例、常见的易错点**，体现该领域的核心知识
 4. **分解深度要求**：每个章节应包含**8-15个主要知识点**，每个主要知识点下应有**3-6个子要点**，子要点下还应有**2-4个更细的说明、公式、示例或注意事项**，总分解层级达到**4-6级**
 5. **严密逻辑连贯**：知识点之间要有**清晰的逻辑顺序**，从基础概念到核心原理，从公式推导到应用实践，层层递进，环环相扣
+6. **权重**：如果与生活有关的，尽量脱离量化，而是与生活技巧贴合。如果是与量化考试有关的，尽量与考点贴合。
 
 输出格式要求：
 1. 使用Markdown列表格式（- 一级要点，缩进表示子要点，使用2个空格缩进）
@@ -135,17 +137,49 @@ const systemPrompt = `
 请直接输出细纲内容，不要添加任何开场白或解释。
 `
 
+const outputSystemPrompt = `
+你是一位专业的知识输出专家，擅长将细粒度的知识点**极致详细、全面深入、多角度全方位**地展开为完整的学习内容。
+
+任务：根据用户提供的章节标题和细纲内容，针对**每个最细粒度的子节点**生成**超详细、高度专业、无任何遗漏、覆盖所有情况**的知识输出内容，确保每个知识点都得到充分展开和深入剖析。
+
+核心原则：**广泛搜集同一细纲内涵下的所有情况**
+- 对于每个知识点，必须穷尽其所有可能的情况、变体、类型、分支
+- 不仅讲解标准情况，还要覆盖特殊情况、边界情况、极限情况
+- 不仅给出典型例子，还要提供反例、易错案例、对比案例
+- 不仅分析正面内容，还要探讨相关概念、延伸知识、跨学科联系
+
+重要要求：
+1. **极致详尽**：必须深入到细纲中的**所有**最细粒度子节点，对**每个**小知识点进行**深入、全面、细致**的讲解
+2. **全面覆盖**：从定义、分类、条件、关系、方法、应用等多个角度分析
+3. **专业深度**：包含核心概念精确定义、原理详细推导、公式完整证明、性质全面阐述
+4. **丰富示例**：每个知识点都要有多个具体、典型、有代表性的示例和案例
+
+输出格式要求：
+1. 使用Markdown格式，结构清晰
+2. 数学公式使用LaTeX格式
+3. 包含概念定义、分类体系、核心原理、公式定理、性质特点、典型例题、常见误区、应用场景
+
+请直接输出知识内容，不要添加任何开场白或解释。
+`
+
 function DetailOutline() {
   const [chapter, setChapter] = useState('')
   const [detail, setDetail] = useState('')
-  const { loading, generateContent } = useAgnesAPI()
+  const [showError, setShowError] = useState(false)
+  const { loading, generateContent, apiError, clearError } = useAgnesAPI()
 
   const {
     workflow,
     updateDetail,
+    updateOutputSection,
     setCurrentStep,
     setCurrentChapterIndex,
     setIsRunning,
+    setParallelMode,
+    addRunningDetailTask,
+    removeRunningDetailTask,
+    addRunningOutputTask,
+    removeRunningOutputTask,
   } = useWorkflow()
   const isRunning = workflow.isRunning
 
@@ -163,10 +197,37 @@ function DetailOutline() {
   }
 
   useEffect(() => {
+    if (workflow.enabled && workflow.currentStep === 'detail') {
+      setParallelMode(true)
+    }
+  }, [workflow.enabled, workflow.currentStep, setParallelMode])
+
+  // 自动选择第一个未完成的章节
+  useEffect(() => {
+    if (workflow.enabled && !chapter && workflow.outlineChapters.length > 0) {
+      // 找到第一个未完成的章节
+      const firstIncomplete = workflow.outlineChapters.find(ch => !workflow.detailSections[ch])
+      if (firstIncomplete) {
+        setChapter(firstIncomplete)
+      } else if (workflow.outlineChapters[0]) {
+        // 如果全部完成，选择第一个（用于继续生成模式）
+        setChapter(workflow.outlineChapters[0])
+      }
+    }
+  }, [workflow.enabled, chapter, workflow.outlineChapters, workflow.detailSections])
+
+  useEffect(() => {
     return () => {
       clearAutoNavigate()
     }
   }, [])
+
+  useEffect(() => {
+    if (apiError && apiError.type === 'api') {
+      setShowError(true)
+      setIsRunning(false)
+    }
+  }, [apiError, setIsRunning])
 
   useEffect(() => {
     const handleNavigate = () => {
@@ -208,73 +269,189 @@ function DetailOutline() {
     setCurrentStep,
   ])
 
-  const handleGenerate = async () => {
-    if (!chapter.trim()) return
+  const generateDetailAndOutput = async (chapter: string, index: number) => {
+    if (stopRequestedRef.current) return
 
-    clearAutoNavigate()
-
-    stopRequestedRef.current = false
-    setStopRequested(false)
-
-    setIsRunning(true)
-    setCurrentStep('detail')
+    addRunningDetailTask(chapter)
 
     let prompt = `${systemPrompt}\n\n章节标题：${chapter}`
-
     if (workflow.outline) {
       prompt = `${systemPrompt}\n\n参考大纲：\n${workflow.outline}\n\n章节标题：${chapter}`
     }
 
     const response = await generateContent(prompt)
+    removeRunningDetailTask(chapter)
 
-    if (stopRequestedRef.current) {
-      setIsRunning(false)
-      return
-    }
+    if (stopRequestedRef.current) return
 
     if (response) {
       updateDetail(chapter, response)
-      setDetail(response)
+      
+      if (index === workflow.currentChapterIndex) {
+        setDetail(response)
+      }
 
-      if (workflow.enabled) {
-        const nextIndex = workflow.currentChapterIndex + 1
-
-        if (nextIndex < workflow.outlineChapters.length) {
-          autoNavigateRef.current = setTimeout(() => {
-            if (stopRequestedRef.current) return
-
-            setCurrentChapterIndex(nextIndex)
-            setDetail('')
-            setChapter(workflow.outlineChapters[nextIndex])
-          }, 1000)
-        } else {
-          autoNavigateRef.current = setTimeout(() => {
-            if (stopRequestedRef.current) return
-
-            // 关键修复：细纲全部完成后，切换到 output 步骤
-            setCurrentStep('output')
-            navigate('/knowledge-output')
-          }, 1000)
+      if (workflow.enabled && workflow.parallelMode) {
+        addRunningOutputTask(chapter)
+        const outputPrompt = `${outputSystemPrompt}\n\n章节标题：${chapter}\n\n细纲内容：\n${response}`
+        const outputResponse = await generateContent(outputPrompt)
+        removeRunningOutputTask(chapter)
+        
+        if (!stopRequestedRef.current && outputResponse) {
+          updateOutputSection(chapter, outputResponse)
         }
       }
     }
+  }
 
-    setIsRunning(false)
+  const handleGenerate = async () => {
+    // 工作流模式下，如果 chapter 为空，自动选择第一个未完成的章节
+    if (workflow.enabled && !chapter.trim()) {
+      const firstIncomplete = workflow.outlineChapters.find(
+        (ch, idx) => idx >= workflow.currentChapterIndex && !workflow.detailSections[ch]
+      )
+      
+      if (firstIncomplete) {
+        setChapter(firstIncomplete)
+        setDetail('')
+        return
+      } else if (workflow.outlineChapters.length > 0) {
+        // 所有章节都已完成，检查是否有后续章节
+        const nextIncompleteIndex = workflow.outlineChapters.findIndex(
+          (ch) => !workflow.detailSections[ch]
+        )
+        
+        if (nextIncompleteIndex !== -1) {
+          setCurrentChapterIndex(nextIncompleteIndex)
+          setChapter(workflow.outlineChapters[nextIncompleteIndex])
+          setDetail('')
+          return
+        } else {
+          // 全部完成，切换到 output 步骤
+          setCurrentStep('output')
+          navigate('/knowledge-output')
+          return
+        }
+      } else {
+        return
+      }
+    }
+    
+    if (!chapter.trim()) return
+
+    // 检查 API Key 是否配置
+    const apiKey = secureStorage.getApiKey()
+    if (!apiKey || !apiKey.trim()) {
+      navigate('/settings')
+      return
+    }
+
+    clearAutoNavigate()
+
+    stopRequestedRef.current = false
+    setStopRequested(false)
+    setIsRunning(true)
+    
+    // 确保 currentStep 设置为 detail
+    if (workflow.currentStep !== 'detail') {
+      setCurrentStep('detail')
+    }
+
+    const maxParallel = workflow.maxParallelTasks || 4
+    const chaptersToProcess = workflow.outlineChapters.filter(
+      (ch, idx) => idx >= workflow.currentChapterIndex && !workflow.detailSections[ch]
+    ).slice(0, maxParallel)
+
+    if (chaptersToProcess.length === 0) {
+      // 如果没有未完成的章节，检查是否还有后续章节需要处理
+      const nextIncompleteIndex = workflow.outlineChapters.findIndex(
+        (ch, idx) => idx >= workflow.currentChapterIndex && !workflow.detailSections[ch]
+      )
+      
+      if (nextIncompleteIndex !== -1 && nextIncompleteIndex < workflow.outlineChapters.length) {
+        // 找到下一个未完成的章节，更新索引并开始生成
+        setCurrentChapterIndex(nextIncompleteIndex)
+        const nextChapter = workflow.outlineChapters[nextIncompleteIndex]
+        setChapter(nextChapter)
+        setDetail('')
+        setIsRunning(false)
+        
+        // 延迟重新开始生成，确保状态已更新
+        setTimeout(() => {
+          handleGenerate()
+        }, 100)
+        return
+      } else {
+        // 所有章节都已完成，切换到 output 步骤
+        setIsRunning(false)
+        setCurrentStep('output')
+        navigate('/knowledge-output')
+        return
+      }
+    }
+
+    try {
+      const tasks = chaptersToProcess.map((ch, idx) => 
+        generateDetailAndOutput(ch, workflow.currentChapterIndex + idx)
+      )
+
+      await Promise.all(tasks)
+
+      if (stopRequestedRef.current) {
+        return
+      }
+
+      // 如果有 API 错误，立即停止运行
+      if (apiError) {
+        return
+      }
+
+      const newIndex = workflow.currentChapterIndex + chaptersToProcess.length
+      
+      if (workflow.enabled) {
+        if (newIndex < workflow.outlineChapters.length) {
+          autoNavigateRef.current = setTimeout(() => {
+            if (stopRequestedRef.current) return
+            setCurrentChapterIndex(newIndex)
+            setDetail('')
+            setChapter(workflow.outlineChapters[newIndex])
+          }, 500)
+        } else {
+          autoNavigateRef.current = setTimeout(() => {
+            if (stopRequestedRef.current) return
+            setCurrentStep('output')
+            navigate('/knowledge-output')
+          }, 500)
+        }
+      }
+    } finally {
+      if (!stopRequestedRef.current) {
+        setIsRunning(false)
+      }
+    }
   }
 
   // 工作流模式下自动开始生成
   useEffect(() => {
     const currentChapterContent = workflow.detailSections?.[chapter]
 
-    if (
+    // 只有在满足所有条件时才自动生成
+    // 1. 工作流启用
+    // 2. 章节存在
+    // 3. 当前章节没有内容
+    // 4. detail为空
+    // 5. 没有正在加载或运行
+    // 6. currentStep为detail或者chapter已有值（支持从其他步骤跳转过来）
+    const shouldAutoGenerate = 
       workflow.enabled &&
       chapter &&
       !currentChapterContent &&
       !detail &&
       !loading &&
       !isRunning &&
-      workflow.currentStep === 'detail'
-    ) {
+      (workflow.currentStep === 'detail' || workflow.currentStep === null)
+
+    if (shouldAutoGenerate) {
       const timer = setTimeout(() => {
         if (!stopRequestedRef.current && !loading && !isRunning) {
           handleGenerate()
@@ -345,10 +522,17 @@ function DetailOutline() {
     (item) => item && item.trim(),
   )
 
+  const completedDetailCount = Object.keys(workflow.detailSections).length
+  const completedOutputCount = Object.keys(workflow.outputSections).length
+
   const progress =
     validChapters.length > 0
-      ? `${workflow.currentChapterIndex + 1} / ${validChapters.length}`
+      ? `${Math.min(completedDetailCount, validChapters.length)} / ${validChapters.length}`
       : ''
+
+  const progressPercent = validChapters.length > 0
+    ? Math.min((completedDetailCount / validChapters.length) * 100, 100)
+    : 0
 
   return (
     <div className="detail-outline-page">
@@ -364,16 +548,12 @@ function DetailOutline() {
               <div
                 className="progress-fill"
                 style={{
-                  width: `${
-                    ((workflow.currentChapterIndex + 1) /
-                      validChapters.length) *
-                    100
-                  }%`,
+                  width: `${progressPercent}%`,
                 }}
               />
             </div>
             <span className="progress-text">
-              正在处理: {progress} - {chapter}
+              细纲完成: {progress} | 正文完成: {Math.min(completedOutputCount, validChapters.length)}/{validChapters.length}
             </span>
           </div>
         )}
@@ -404,7 +584,7 @@ function DetailOutline() {
             <button
               className="btn btn-primary generate-btn"
               onClick={handleGenerate}
-              disabled={!chapter.trim()}
+              disabled={!workflow.enabled && !chapter.trim()}
             >
               {workflow.enabled ? <Play size={18} /> : <Send size={18} />}
               {workflow.enabled ? '继续工作流' : '生成分点'}
@@ -423,6 +603,44 @@ function DetailOutline() {
           </div>
         )}
       </div>
+
+      {showError && apiError && (
+        <div className="error-toast" style={{
+          position: 'fixed',
+          top: '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(239, 68, 68, 0.95)',
+          color: '#fff',
+          padding: '16px 24px',
+          borderRadius: '12px',
+          zIndex: 1000,
+          maxWidth: '500px',
+          textAlign: 'center',
+          boxShadow: '0 4px 20px rgba(239, 68, 68, 0.4)',
+          backdropFilter: 'blur(10px)'
+        }}>
+          <div style={{ marginBottom: '8px', fontWeight: '600' }}>生成失败</div>
+          <div style={{ fontSize: '14px', marginBottom: '12px' }}>{apiError.message}</div>
+          <button
+            onClick={() => {
+              setShowError(false)
+              clearError()
+            }}
+            style={{
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              color: '#fff',
+              padding: '6px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '13px'
+            }}
+          >
+            确定
+          </button>
+        </div>
+      )}
 
       <div className="system-prompt-section">
         <h3 className="section-title">系统指令</h3>
