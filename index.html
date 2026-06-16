@@ -1,25 +1,45 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-    <meta http-equiv="Pragma" content="no-cache" />
-    <meta http-equiv="Expires" content="0" />
+      }
+      
+      // 显示帮助
+      function showHelp() {
+        alert(`📚 Agnes AI 教科书编辑器 使用帮助：
 
-    <link rel="icon" type="image/svg+xml" href="./vite.svg" />
+1️⃣ 首先在设置页面配置您的 API Key
+2️⃣ API Key 验证成功后即可开始使用
+3️⃣ 支持自动生成各学科教科书内容
+4️⃣ 可实时编辑和预览生成的内容
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-    <title>教科书编辑器 - Agnes AI</title>
-
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap"
-    />
-  </head>
-
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+💡 提示：通知栏会始终驻留在页面顶部，方便您随时查看状态！`);
+      }
+      
+      // 更新API状态
+      function updateAPIStatus(valid) {
+        if (valid) {
+          statusDot.className = 'status-dot';
+          statusText.textContent = 'API Key 已验证';
+        } else {
+          statusDot.className = 'status-dot warning';
+          statusText.textContent = 'API Key 待配置';
+        }
+      }
+      
+      // 检查本地存储的最小化状态
+      if (localStorage.getItem('notificationMinimized') === 'true') {
+        notificationBar.classList.add('minimized');
+      }
+      
+      // 监听API Key状态变化
+      window.addEventListener('apiKeyValid', () => updateAPIStatus(true));
+      window.addEventListener('apiKeyInvalid', () => updateAPIStatus(false));
+      
+      // 定期检查localStorage中的API Key状态
+      setInterval(() => {
+        const apiKey = localStorage.getItem('apiKey') || localStorage.getItem('agnes_api_key');
+        if (apiKey && apiKey.length > 10) {
+          updateAPIStatus(true);
+        }
+      }, 1000);
+    </script>
   </body>
 </html>
