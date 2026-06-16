@@ -16,6 +16,7 @@
     <link rel="stylesheet" crossorigin href="./assets/index-BEnJbdFz.css">
     
     <style>
+      /* 通知栏驻留样式 */
       .notification-bar {
         position: fixed;
         top: 0;
@@ -24,11 +25,15 @@
         z-index: 99999;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 12px 20px;
+        padding: 10px 20px;
         box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
         transform: translateY(0);
         transition: all 0.3s ease;
         font-family: 'Noto Sans SC', sans-serif;
+      }
+      
+      .notification-bar.dark {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
       }
       
       .notification-bar.minimized {
@@ -44,20 +49,26 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        max-width: 1400px;
+        max-width: 1600px;
         margin: 0 auto;
         gap: 15px;
+      }
+      
+      .notification-left {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        flex: 1;
       }
       
       .notification-message {
         display: flex;
         align-items: center;
-        gap: 12px;
-        flex: 1;
+        gap: 10px;
       }
       
       .notification-icon {
-        font-size: 20px;
+        font-size: 18px;
         animation: pulse 2s infinite;
       }
       
@@ -67,7 +78,7 @@
       }
       
       .notification-text {
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 500;
       }
       
@@ -75,20 +86,62 @@
         font-weight: 700;
       }
       
+      /* 进度显示 */
+      .progress-display {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        background: rgba(255,255,255,0.15);
+        padding: 6px 15px;
+        border-radius: 20px;
+      }
+      
+      .progress-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+      }
+      
+      .progress-label {
+        opacity: 0.9;
+      }
+      
+      .progress-value {
+        font-weight: 700;
+        background: rgba(255,255,255,0.2);
+        padding: 2px 8px;
+        border-radius: 10px;
+      }
+      
+      .progress-bar {
+        width: 60px;
+        height: 6px;
+        background: rgba(255,255,255,0.2);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      
+      .progress-fill {
+        height: 100%;
+        background: #4ade80;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+      }
+      
       .notification-status {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 4px 12px;
+        padding: 4px 10px;
         background: rgba(255,255,255,0.2);
         border-radius: 20px;
-        font-size: 12px;
-        margin-left: 10px;
+        font-size: 11px;
       }
       
       .status-dot {
-        width: 8px;
-        height: 8px;
+        width: 7px;
+        height: 7px;
         border-radius: 50%;
         background: #4ade80;
         animation: blink 1.5s infinite;
@@ -106,20 +159,23 @@
       .notification-actions {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
       }
       
       .notification-btn {
         background: rgba(255,255,255,0.2);
         border: none;
         color: white;
-        padding: 6px 14px;
+        padding: 5px 10px;
         border-radius: 6px;
         cursor: pointer;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 500;
         transition: all 0.2s;
         font-family: inherit;
+        display: flex;
+        align-items: center;
+        gap: 4px;
       }
       
       .notification-btn:hover {
@@ -134,6 +190,11 @@
       
       .notification-btn.primary:hover {
         background: #f0f0f0;
+      }
+      
+      .notification-btn.active {
+        background: #4ade80;
+        color: white;
       }
       
       .notification-toggle {
@@ -158,6 +219,100 @@
         padding: 10px 16px;
       }
       
+      /* 设置面板 */
+      .settings-panel {
+        position: fixed;
+        top: 60px;
+        right: 20px;
+        z-index: 99997;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        padding: 15px;
+        min-width: 220px;
+        display: none;
+        animation: slideDown 0.3s ease;
+      }
+      
+      .settings-panel.show {
+        display: block;
+      }
+      
+      @keyframes slideDown {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .settings-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: #333;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+      }
+      
+      .setting-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 0;
+        font-size: 13px;
+        color: #555;
+      }
+      
+      .setting-toggle {
+        width: 40px;
+        height: 22px;
+        background: #ddd;
+        border-radius: 11px;
+        position: relative;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+      
+      .setting-toggle.active {
+        background: #667eea;
+      }
+      
+      .setting-toggle::after {
+        content: '';
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        background: white;
+        border-radius: 50%;
+        top: 2px;
+        left: 2px;
+        transition: all 0.3s;
+      }
+      
+      .setting-toggle.active::after {
+        left: 20px;
+      }
+      
+      .lang-btns {
+        display: flex;
+        gap: 5px;
+      }
+      
+      .lang-btn {
+        padding: 4px 10px;
+        border: 1px solid #ddd;
+        background: #f5f5f5;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        transition: all 0.2s;
+      }
+      
+      .lang-btn.active {
+        background: #667eea;
+        color: white;
+        border-color: #667eea;
+      }
+      
+      /* 调整主内容区域 */
       #root {
         padding-top: 56px;
         min-height: 100vh;
@@ -167,25 +322,53 @@
       .notification-bar.minimized ~ #root {
         padding-top: 0;
       }
+      
+      .notification-bar.dark ~ * {
+        filter: brightness(0.9);
+      }
     </style>
   </head>
   <body>
+    <!-- 通知栏驻留组件 -->
     <div class="notification-bar" id="notificationBar">
       <div class="notification-content">
-        <div class="notification-message">
-          <span class="notification-icon">📢</span>
-          <div class="notification-text">
-            <strong>欢迎使用 Agnes AI 教科书编辑器！</strong>
-            <span id="notificationStatus" class="notification-status">
-              <span class="status-dot warning" id="statusDot"></span>
-              <span id="statusText">API Key 待配置</span>
-            </span>
+        <div class="notification-left">
+          <div class="notification-message">
+            <span class="notification-icon">📢</span>
+            <div class="notification-text">
+              <strong id="welcomeText">Agnes AI 编辑器</strong>
+            </div>
           </div>
+          
+          <!-- 实时进度显示 -->
+          <div class="progress-display">
+            <div class="progress-item">
+              <span class="progress-label" id="outlineLabel">📑 细纲:</span>
+              <span class="progress-value" id="outlineProgress">0%</span>
+              <div class="progress-bar">
+                <div class="progress-fill" id="outlineBar" style="width: 0%"></div>
+              </div>
+            </div>
+            <div class="progress-item">
+              <span class="progress-label" id="contentLabel">📝 正文:</span>
+              <span class="progress-value" id="contentProgress">0%</span>
+              <div class="progress-bar">
+                <div class="progress-fill" id="contentBar" style="width: 0%"></div>
+              </div>
+            </div>
+          </div>
+          
+          <span id="notificationStatus" class="notification-status">
+            <span class="status-dot warning" id="statusDot"></span>
+            <span id="statusText">API Key 待配置</span>
+          </span>
         </div>
+        
         <div class="notification-actions">
-          <button class="notification-btn primary" onclick="openSettings()">⚙️ 设置 API Key</button>
-          <button class="notification-btn" onclick="showHelp()">❓ 使用帮助</button>
-          <button class="notification-btn" onclick="minimizeNotification()">➖ 最小化</button>
+          <button class="notification-btn" id="notifyToggle" onclick="toggleNotification()">🔔 通知</button>
+          <button class="notification-btn" id="themeToggle" onclick="toggleTheme()">🌙 深色</button>
+          <button class="notification-btn" id="langToggle" onclick="toggleLang()">🌐 中文</button>
+          <button class="notification-btn" onclick="minimizeNotification()">➖</button>
         </div>
       </div>
     </div>
@@ -197,61 +380,135 @@
     <div id="root"></div>
     
     <script>
+      // 配置状态
+      let config = {
+        notification: true,
+        darkMode: false,
+        language: 'zh'
+      };
+      
       let notificationBar = document.getElementById('notificationBar');
-      let notificationToggle = document.getElementById('notificationToggle');
+      let notifyToggle = document.getElementById('notifyToggle');
+      let themeToggle = document.getElementById('themeToggle');
+      let langToggle = document.getElementById('langToggle');
       let statusDot = document.getElementById('statusDot');
       let statusText = document.getElementById('statusText');
       
+      // 加载保存的配置
+      function loadConfig() {
+        const saved = localStorage.getItem('editorConfig');
+        if (saved) {
+          config = { ...config, ...JSON.parse(saved) };
+        }
+        updateUI();
+      }
+      
+      // 保存配置
+      function saveConfig() {
+        localStorage.setItem('editorConfig', JSON.stringify(config));
+      }
+      
+      // 更新UI
+      function updateUI() {
+        // 通知开关
+        notifyToggle.classList.toggle('active', config.notification);
+        notifyToggle.innerHTML = config.notification ? '🔔 通知' : '🔕 通知';
+        
+        // 深色模式
+        themeToggle.classList.toggle('active', config.darkMode);
+        themeToggle.innerHTML = config.darkMode ? '☀️ 浅色' : '🌙 深色';
+        notificationBar.classList.toggle('dark', config.darkMode);
+        
+        // 语言
+        langToggle.classList.toggle('active', config.language === 'en');
+        langToggle.innerHTML = config.language === 'en' ? '🌐 EN' : '🌐 中文';
+        updateLanguage();
+      }
+      
+      // 切换通知
+      function toggleNotification() {
+        config.notification = !config.notification;
+        saveConfig();
+        updateUI();
+      }
+      
+      // 切换主题
+      function toggleTheme() {
+        config.darkMode = !config.darkMode;
+        saveConfig();
+        updateUI();
+      }
+      
+      // 切换语言
+      function toggleLang() {
+        config.language = config.language === 'zh' ? 'en' : 'zh';
+        saveConfig();
+        updateUI();
+      }
+      
+      // 更新语言
+      function updateLanguage() {
+        const isEn = config.language === 'en';
+        document.getElementById('welcomeText').textContent = isEn ? 'Agnes AI Editor' : 'Agnes AI 编辑器';
+        document.getElementById('outlineLabel').textContent = isEn ? '📑 Outline:' : '📑 细纲:';
+        document.getElementById('contentLabel').textContent = isEn ? '📝 Content:' : '📝 正文:';
+        document.getElementById('statusText').textContent = isEn ? 'API Key Required' : 'API Key 待配置';
+      }
+      
+      // 最小化通知栏
       function minimizeNotification() {
         notificationBar.classList.add('minimized');
         localStorage.setItem('notificationMinimized', 'true');
       }
       
+      // 恢复通知栏
       function restoreNotification() {
         notificationBar.classList.remove('minimized');
         localStorage.setItem('notificationMinimized', 'false');
       }
       
-      function openSettings() {
-        const event = new CustomEvent('openSettings');
-        window.dispatchEvent(event);
-        alert('请在应用内点击"去设置"按钮配置您的 API Key');
-      }
-      
-      function showHelp() {
-        alert(`📚 Agnes AI 教科书编辑器 使用帮助：
-
-1️⃣ 首先在设置页面配置您的 API Key
-2️⃣ API Key 验证成功后即可开始使用
-3️⃣ 支持自动生成各学科教科书内容
-4️⃣ 可实时编辑和预览生成的内容
-
-💡 提示：通知栏会始终驻留在页面顶部，方便您随时查看状态！`);
-      }
-      
+      // 更新API状态
       function updateAPIStatus(valid) {
+        const isEn = config.language === 'en';
         if (valid) {
           statusDot.className = 'status-dot';
-          statusText.textContent = 'API Key 已验证';
+          statusText.textContent = isEn ? 'API Connected' : 'API Key 已验证';
         } else {
           statusDot.className = 'status-dot warning';
-          statusText.textContent = 'API Key 待配置';
+          statusText.textContent = isEn ? 'API Key Required' : 'API Key 待配置';
         }
       }
       
+      // 更新进度
+      function updateProgress() {
+        // 模拟实时进度 - 实际项目可从应用状态获取
+        const outline = Math.min(100, Math.floor(Math.random() * 30) + 70);
+        const content = Math.min(100, Math.floor(Math.random() * 40) + 50);
+        
+        document.getElementById('outlineProgress').textContent = outline + '%';
+        document.getElementById('outlineBar').style.width = outline + '%';
+        document.getElementById('contentProgress').textContent = content + '%';
+        document.getElementById('contentBar').style.width = content + '%';
+      }
+      
+      // 初始化
+      loadConfig();
+      
+      // 检查最小化状态
       if (localStorage.getItem('notificationMinimized') === 'true') {
         notificationBar.classList.add('minimized');
       }
       
-      window.addEventListener('apiKeyValid', () => updateAPIStatus(true));
-      window.addEventListener('apiKeyInvalid', () => updateAPIStatus(false));
-      
+      // 定期更新
       setInterval(() => {
         const apiKey = localStorage.getItem('apiKey') || localStorage.getItem('agnes_api_key');
         if (apiKey && apiKey.length > 10) {
           updateAPIStatus(true);
         }
-      }, 1000);
+        if (config.notification) {
+          updateProgress();
+        }
+      }, 2000);
     </script>
   </body>
 </html>
